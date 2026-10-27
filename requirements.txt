@@ -3,3 +3,4 @@ uvicorn[standard]==0.34.0
 httpx==0.28.1
 pydantic==2.10.4
 apify>=2.1.0
+browserforge<=1.2.3
