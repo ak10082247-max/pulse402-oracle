@@ -836,7 +836,7 @@ async def mcp_rpc(request: Request):
         })
 
     if method == "tools/call":
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = request.headers.get("cf-connecting-ip") or (request.headers.get("x-forwarded-for", "").split(",")[0].strip()) or (request.client.host if request.client else "unknown")
         session_token = request.headers.get("X-Pulse-Session")
         sig_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
 
