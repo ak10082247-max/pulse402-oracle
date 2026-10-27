@@ -26,7 +26,8 @@ async def main():
                     if res.status_code == 200:
                         data = res.json()
                         # Pay-Per-Event billing: charge 1 event unit per feed delivery
-                        await Actor.charge(event_name="oracle-feed-fetch", count=1)
+                        if hasattr(Actor, "charge"):
+                            await Actor.charge(event_name="oracle-feed-fetch", count=1)
                         await Actor.push_data(data)
                         Actor.log.info(f"Delivered feed {ep} and charged PPE event 'oracle-feed-fetch'")
                     else:
