@@ -1,0 +1,25 @@
+{
+  "name": "pulse402-oracle",
+  "version": "1.0.0",
+  "description": "Pulse402 — High-Frequency Consumable x402 Data Oracle on Cloudflare Edge",
+  "main": "worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [
+    "x402",
+    "base",
+    "usdc",
+    "oracle",
+    "mcp",
+    "polymarket",
+    "dex",
+    "cloudflare-worker"
+  ],
+  "author": "kuroxreal",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.99.0"
+  }
+}

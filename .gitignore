@@ -1,0 +1,46 @@
+# Secrets and environment
+.env*
+!*.example
+*.key
+*.pem
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+
+# Node & Cloudflare
+node_modules/
+.wrangler/
+wrangler.log
+
+# Databases & local logs
+*.sqlite
+*.sqlite3
+*.db
+*.log
+state/
+
+# Operating system
+.DS_Store
+Thumbs.db

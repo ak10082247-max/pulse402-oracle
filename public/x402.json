@@ -1,0 +1,40 @@
+{
+  "x402Version": 2,
+  "service": "pulse402-oracle",
+  "description": "High-Frequency Consumable x402 Data Oracle for Autonomous AI Agents",
+  "pricing": {
+    "currency": "USDC",
+    "network": "eip155:8453",
+    "payTo": "0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "standard_call_usd": "0.001",
+    "prepay_session_usd": "5.000",
+    "prepay_session_calls": 6000
+  },
+  "endpoints": [
+    {
+      "path": "/v1/pulse/base-liquidity",
+      "method": "GET",
+      "price": "0.001",
+      "description": "Base DEX pool reserve deltas, 60s netflow velocity & slippage"
+    },
+    {
+      "path": "/v1/pulse/polymarket-velocity",
+      "method": "GET",
+      "price": "0.001",
+      "description": "Live Polymarket probability velocity & orderbook spread imbalances"
+    },
+    {
+      "path": "/v1/pulse/threat-intel",
+      "method": "GET",
+      "price": "0.001",
+      "description": "Newly flagged Base honeypots & malicious approval spenders"
+    },
+    {
+      "path": "/v1/pulse/arb-routes",
+      "method": "GET",
+      "price": "0.001",
+      "description": "Live cross-DEX price discrepancies & executable arbitrage routes"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "pulse402-oracle",
+  "description": "High-Frequency Consumable Market & Security Telemetry Oracle for AI Agents",
+  "version": "1.0.0",
+  "transport": {
+    "type": "http",
+    "endpoint": "https://pulse402-oracle.onrender.com/mcp"
+  },
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": false
+  }
+}

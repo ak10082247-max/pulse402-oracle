@@ -1,0 +1,93 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pulse402 — High-Frequency Consumable x402 Data Oracle",
+    "description": "Real-time non-cacheable data oracle serving Base DEX liquidity, Polymarket velocity, threat intel, and cross-DEX arb routes for autonomous AI agents.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://pulse402-oracle.onrender.com",
+      "description": "Render Production Host"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Service health check",
+        "description": "Unauthenticated endpoint returning engine health and active polling status in under 50ms.",
+        "responses": {
+          "200": { "description": "Service is healthy and polling." }
+        }
+      }
+    },
+    "/.well-known/x402.json": {
+      "get": {
+        "summary": "x402 protocol discovery manifest",
+        "description": "Standard x402 V2 manifest advertising Base Mainnet payment details.",
+        "responses": {
+          "200": { "description": "x402 manifest." }
+        }
+      }
+    },
+    "/v1/pulse/base-liquidity": {
+      "get": {
+        "summary": "Base DEX pool reserves, netflow velocity & slippage quotes",
+        "description": "Live Aerodrome and Uniswap v3 reserves, 60s netflow velocity, and slippage for $100 / $1k / $10k.",
+        "responses": {
+          "200": { "description": "Live non-cacheable Base DEX liquidity snapshot." },
+          "402": { "description": "Payment Required ($0.001 USDC on Base)." }
+        }
+      }
+    },
+    "/v1/pulse/polymarket-velocity": {
+      "get": {
+        "summary": "Polymarket probability velocity & spread imbalances",
+        "description": "Prediction markets moving >2% in 5 minutes with orderbook spread imbalances and whale signals.",
+        "responses": {
+          "200": { "description": "Live Polymarket velocity snapshot." },
+          "402": { "description": "Payment Required ($0.001 USDC on Base)." }
+        }
+      }
+    },
+    "/v1/pulse/threat-intel": {
+      "get": {
+        "summary": "Base honeypot contracts & malicious spenders",
+        "description": "Rolling feed of newly detected honeypot contracts and malicious approval proxies.",
+        "responses": {
+          "200": { "description": "Live threat intelligence feed." },
+          "402": { "description": "Payment Required ($0.001 USDC on Base)." }
+        }
+      }
+    },
+    "/v1/pulse/arb-routes": {
+      "get": {
+        "summary": "Base cross-DEX arbitrage routes",
+        "description": "Real-time price discrepancies and executable smart-router paths between Aerodrome and Uniswap v3.",
+        "responses": {
+          "200": { "description": "Executable arbitrage routes with net profit after fees and gas." },
+          "402": { "description": "Payment Required ($0.001 USDC on Base)." }
+        }
+      }
+    },
+    "/v1/pass/prepay": {
+      "post": {
+        "summary": "Prepay session pass for HFT agents",
+        "description": "Prepay $5 USDC for a 6,000-call low-latency session token (X-Pulse-Session).",
+        "responses": {
+          "200": { "description": "Active session pass created." }
+        }
+      }
+    },
+    "/mcp": {
+      "post": {
+        "summary": "Model Context Protocol JSON-RPC 2.0 stream",
+        "description": "Handles initialize, ping, tools/list, and tools/call for MCP clients.",
+        "responses": {
+          "200": { "description": "JSON-RPC response." },
+          "402": { "description": "Payment Required for tool execution." }
+        }
+      }
+    }
+  }
+}

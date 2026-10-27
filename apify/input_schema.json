@@ -1,0 +1,15 @@
+{
+  "title": "Pulse402 Feed Selector",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "feed": {
+      "title": "Target Feed",
+      "type": "string",
+      "description": "The high-frequency oracle feed to query",
+      "default": "all",
+      "editor": "select",
+      "enum": ["all", "base_liquidity", "polymarket_velocity", "threat_intel", "arb_routes"]
+    }
+  }
+}

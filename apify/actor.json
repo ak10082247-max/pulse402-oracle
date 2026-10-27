@@ -1,0 +1,15 @@
+{
+  "actorSpecification": 1,
+  "name": "pulse402-oracle",
+  "title": "Pulse402 — High-Frequency Base DEX & Polymarket Alpha Oracle",
+  "description": "Live non-cacheable Base DEX liquidity, Polymarket probability velocity, and cross-DEX arb feeds for automated trading bots and AI agents.",
+  "version": "1.0",
+  "meta": {
+    "templateId": "python-start"
+  },
+  "pricing": {
+    "pricingModel": "PAY_PER_EVENT",
+    "pricePerUnitUsd": 0.01
+  },
+  "input": "./input_schema.json"
+}

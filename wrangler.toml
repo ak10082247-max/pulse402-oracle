@@ -1,0 +1,12 @@
+name = "pulse402-oracle"
+main = "worker.js"
+compatibility_date = "2024-11-05"
+account_id = "399816be9d4332789f68c30dfb87f390"
+workers_dev = true
+
+[vars]
+PAYOUT_WALLET = "0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1"
+SERVICE_NAME = "pulse402-oracle"
+BASE_NETWORK = "eip155:8453"
+BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+PRICE_USDC = "0.001"

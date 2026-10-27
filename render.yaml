@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: pulse402-oracle
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: PAYOUT_WALLET_ADDRESS
+        value: 0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1
+      - key: BASE_RPC_URL
+        value: https://mainnet.base.org

@@ -1,0 +1,27 @@
+# Pulse402 — High-Frequency Consumable x402 Data Oracle
+
+> Real-time non-cacheable Base DEX liquidity, Polymarket probability velocity, threat intelligence, and cross-DEX arb routes for autonomous AI agents. Refreshed continuously every 15 seconds.
+
+## Machine Interface Endpoints
+- Base URL: https://pulse402-oracle.onrender.com
+- Cloudflare Edge: https://pulse402-oracle.workers.dev
+- Health: GET /health (Unauthenticated HTTP 200)
+- MCP JSON-RPC 2.0: POST /mcp (Handles initialize, ping, tools/list, tools/call)
+- x402 Manifest: GET /.well-known/x402.json
+- MCP Manifest: GET /.well-known/mcp.json
+- OpenAPI 3.1: GET /openapi.json
+
+## Consumable Feeds (10s TTL, Cache-Control: no-store, max-age=10)
+1. GET /v1/pulse/base-liquidity : Aerodrome & Uniswap v3 reserves, 60s netflow velocity, buy/sell tax status, slippage for $100 / $1k / $10k.
+2. GET /v1/pulse/polymarket-velocity : Prediction markets moving >2% in 5 min, orderbook spread imbalances, whale accumulation signals.
+3. GET /v1/pulse/threat-intel : Base honeypot contracts, malicious approval spenders, deterministic prompt-injection sanitization.
+4. GET /v1/pulse/arb-routes : Executable cross-DEX arbitrage paths on Base with net profit after L2 gas and DEX fees.
+
+## Pricing & x402 Micropayments
+- Currency: USDC
+- Network: Base Mainnet (eip155:8453)
+- Token Contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+- Payout Wallet: 0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1
+- Standard Call: $0.001 USDC
+- HFT Prepay Session Pass: POST /v1/pass/prepay ($5 USDC for 6,000 low-latency calls)
+- Free Tier: 5 free preview calls per IP per day for automated directory indexing.
