@@ -992,6 +992,25 @@ Free developer previews available at GET /v1/preview/{feed}`, {
         respHeaders["X-Payment-Response"] = receipt;
       }
 
+      // Fetch live feed data
+      let data = null;
+      try {
+        const backendRes = await fetch(`https://pulse402-oracle.onrender.com${path}`, {
+          headers: { "User-Agent": "Pulse402-Edge-Gateway/1.0" },
+          cf: { cacheTtl: 5 }
+        });
+        if (backendRes.ok) {
+          const backendJson = await backendRes.json();
+          if (backendJson && backendJson.data) {
+            data = backendJson.data;
+          }
+        }
+      } catch (err) {}
+
+      if (!data) {
+        data = await FEEDS[path]();
+      }
+
       return new Response(JSON.stringify({
         status: "ok",
         feed: path,
