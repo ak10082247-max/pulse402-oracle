@@ -23,5 +23,5 @@ jobs:
           echo "MCP response: $MCP_INIT"
 
           echo "Pinging Cloudflare Edge Worker..."
-          CF_HEALTH=$(curl -s --max-time 10 https://pulse402-oracle.399816be9d4332789f68c30dfb87f390.workers.dev/health || echo '{"status":"edge_offline"}')
+          CF_HEALTH=$(curl -s --max-time 10 https://pulse402-oracle.ak10082247.workers.dev/health || echo '{"status":"edge_offline"}')
           echo "Cloudflare Edge response: $CF_HEALTH"
