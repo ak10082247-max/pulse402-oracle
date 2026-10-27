@@ -22,17 +22,23 @@ logger = logging.getLogger("pulse402.app")
 
 # Constants & Payment Configuration
 SERVICE_NAME = "pulse402-oracle"
-SERVICE_VERSION = "1.1.0"
+SERVICE_VERSION = "1.2.0"
 BASE_CHAIN_ID = 8453
 BASE_NETWORK = "eip155:8453"
 BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 PAYOUT_WALLET_ADDRESS = os.environ.get("PAYOUT_WALLET_ADDRESS", "0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1")
 
+SOLANA_NETWORK = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+SOLANA_PAYOUT_WALLET = os.environ.get("SOLANA_MERCHANT_ADDRESS", "3tQ4GthjUMqNsyrb1rZMocMHoNewFQWjDUvHZqWeYuCN")
+SOLANA_FEE_PAYER = "CjNFTjvBhbJJd2B5ePPMHRLx1ELZpa8dwQgGL727eKww"
+
 PRICE_PER_CALL_USDC = "0.001"
 PRICE_PER_CALL_MICRO = "1000"  # 1,000 micro-units = 0.001 USDC
 
-# Session pass storage: { "token": { "expires_at": timestamp, "calls_remaining": N } }
+# Session pass storage & MCP free call tracking
 _PREPAY_SESSIONS: Dict[str, Dict[str, Any]] = {}
+_MCP_FREE_CALLS: Dict[str, Dict[str, Any]] = {}
 
 # SSRF blocked targets
 SSRF_BLOCKED_HOSTS = {
@@ -309,6 +315,15 @@ def build_bazaar_402_challenge(path: str, request_url: str):
             "maxTimeoutSeconds": 300,
             "payTo": PAYOUT_WALLET_ADDRESS,
             "extra": {"name": "USD Coin", "version": "2"}
+        },
+        {
+            "scheme": "exact",
+            "network": SOLANA_NETWORK,
+            "asset": SOLANA_USDC,
+            "amount": PRICE_PER_CALL_MICRO,
+            "maxTimeoutSeconds": 300,
+            "payTo": SOLANA_PAYOUT_WALLET,
+            "extra": {"name": "USD Coin (Solana)", "version": "2", "feePayer": SOLANA_FEE_PAYER}
         }
     ]
 
@@ -347,8 +362,11 @@ def build_bazaar_402_challenge(path: str, request_url: str):
         "endpoint": path,
         "message": f"Payment of {PRICE_PER_CALL_USDC} USDC required. Unpaid access strictly requires valid x402 authorization.",
         "price_usdc": PRICE_PER_CALL_USDC,
-        "payout_wallet": PAYOUT_WALLET_ADDRESS,
-        "network": BASE_NETWORK,
+        "payout_wallets": {
+            "base": PAYOUT_WALLET_ADDRESS,
+            "solana": SOLANA_PAYOUT_WALLET
+        },
+        "networks": [BASE_NETWORK, SOLANA_NETWORK],
         "resource": pr["resource"],
         "accepts": pr["accepts"],
         "extensions": pr["extensions"]
@@ -403,59 +421,113 @@ def check_access(request: Request, feed_path: str) -> Optional[Response]:
     return build_bazaar_402_challenge(feed_path, str(request.url))
 
 async def handle_feed_response(request: Request, feed_name: str, path: str):
-    access_challenge = check_access(request, path)
-    if access_challenge:
-        return access_challenge
+    session_token = request.headers.get("X-Pulse-Session")
+    sig_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT") or request.headers.get("x-payment")
 
-    data = get_feed_state(feed_name)
+    session_allowed = False
+    if session_token and session_token in _PREPAY_SESSIONS:
+        sess = _PREPAY_SESSIONS[session_token]
+        if sess["expires_at"] > time.time() and sess["calls_remaining"] > 0:
+            sess["calls_remaining"] -= 1
+            session_allowed = True
+
+    # If unpaid and no session pass, strictly return HTTP 402
+    if not session_allowed and not sig_header:
+        return build_bazaar_402_challenge(path, str(request.url))
+
     headers = {
         "Cache-Control": "no-store, max-age=10",
         "X-Pulse-Oracle": "Pulse402",
         "X-Pulse-TTL": "10"
     }
 
-    sig_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT") or request.headers.get("x-payment")
+    # If payment signature attached, strictly verify and settle via PayAI Facilitator (ZERO MOCK / ZERO SYNTHETIC FALLBACK)
     if sig_header:
-        payment_obj = None
         try:
             raw = sig_header.strip()
             payment_obj = json.loads(raw if raw.startswith("{") else base64.b64decode(raw).decode("utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            return JSONResponse(status_code=402, content={
+                "error": "invalid_payment_signature",
+                "status": 402,
+                "message": f"Failed to decode Base64 payment signature: {str(e)}"
+            })
 
-        tx_hash = f"0x{uuid.uuid4().hex}{uuid.uuid4().hex}"[:66]
-        payer = request.headers.get("X-Payer-Address") or (payment_obj.get("payload", {}).get("from") if payment_obj else None) or "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD"
+        if not payment_obj or ("payload" not in payment_obj and "transaction" not in payment_obj):
+            return JSONResponse(status_code=402, content={
+                "error": "invalid_payment_payload",
+                "status": 402,
+                "message": "Payment signature missing payload structure"
+            })
 
-        # Dispatch settlement to PayAI Facilitator
-        if payment_obj and "accepted" in payment_obj:
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    settle_res = await client.post("https://facilitator.payai.network/settle", json={
+        net = str(payment_obj.get("accepted", {}).get("network", payment_obj.get("network", "")))
+        is_solana = net.startswith("solana") or ("transaction" in payment_obj.get("payload", {}) and "authorization" not in payment_obj.get("payload", {}))
+        meta = BAZAAR_METADATA.get(path, BAZAAR_METADATA["/v1/pulse/threat-intel"])
+
+        target_requirements = {
+            "scheme": "exact",
+            "network": SOLANA_NETWORK,
+            "asset": SOLANA_USDC,
+            "amount": PRICE_PER_CALL_MICRO,
+            "maxTimeoutSeconds": 300,
+            "payTo": SOLANA_PAYOUT_WALLET,
+            "extra": {"name": "USD Coin (Solana)", "version": "2", "feePayer": SOLANA_FEE_PAYER}
+        } if is_solana else {
+            "scheme": "exact",
+            "network": BASE_NETWORK,
+            "asset": BASE_USDC,
+            "amount": PRICE_PER_CALL_MICRO,
+            "maxTimeoutSeconds": 300,
+            "payTo": PAYOUT_WALLET_ADDRESS,
+            "extra": {"name": "USD Coin", "version": "2"}
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                settle_res = await client.post("https://facilitator.payai.network/settle", json={
+                    "x402Version": 2,
+                    "paymentPayload": {
                         "x402Version": 2,
-                        "paymentPayload": payment_obj,
-                        "paymentRequirements": payment_obj["accepted"]
+                        "resource": {"url": str(request.url), "description": meta["description"], "mimeType": "application/json"},
+                        "extensions": payment_obj.get("extensions"),
+                        "accepted": target_requirements,
+                        "payload": payment_obj.get("payload", {"transaction": payment_obj.get("transaction")})
+                    },
+                    "paymentRequirements": target_requirements
+                })
+                settle_data = settle_res.json() if settle_res.content else {}
+                if settle_res.status_code != 200 or not settle_data.get("success") or not settle_data.get("transaction"):
+                    return JSONResponse(status_code=402, content={
+                        "error": "payment_failed",
+                        "status": 402,
+                        "message": settle_data.get("error", settle_data.get("message", "PayAI Facilitator rejected payment authorization or failed to settle on-chain")),
+                        "facilitator_status": settle_res.status_code,
+                        "details": settle_data
                     })
-                    if settle_res.status_code == 200:
-                        settle_json = settle_res.json()
-                        if "transaction" in settle_json:
-                            tx_hash = settle_json["transaction"]
-                        if "payer" in settle_json:
-                            payer = settle_json["payer"]
-            except Exception:
-                pass
+        except Exception as e:
+            return JSONResponse(status_code=402, content={
+                "error": "facilitator_unavailable",
+                "status": 402,
+                "message": f"Could not reach PayAI Facilitator: {str(e)}"
+            })
+
+        tx_hash = settle_data["transaction"]
+        payer = settle_data.get("payer", payment_obj.get("payload", {}).get("from", "solana-payer" if is_solana else "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD"))
+        settled_network = SOLANA_NETWORK if is_solana else BASE_NETWORK
 
         receipt = {
             "success": True,
             "payer": payer,
             "transaction": tx_hash,
             "amount": PRICE_PER_CALL_MICRO,
-            "network": BASE_NETWORK,
+            "network": settled_network,
             "resource": {"url": str(request.url)}
         }
         encoded_receipt = base64.b64encode(json.dumps(receipt).encode("utf-8")).decode("utf-8")
         headers["PAYMENT-RESPONSE"] = encoded_receipt
         headers["X-Payment-Response"] = encoded_receipt
 
+    data = get_feed_state(feed_name)
     return JSONResponse(content={"status": "ok", "feed": path, "timestamp_ms": int(time.time() * 1000), "ttl_seconds": 10, "data": data}, headers=headers)
 
 # ==============================================================================
@@ -764,6 +836,43 @@ async def mcp_rpc(request: Request):
         })
 
     if method == "tools/call":
+        client_ip = request.client.host if request.client else "unknown"
+        session_token = request.headers.get("X-Pulse-Session")
+        sig_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
+
+        mcp_allowed = False
+        if session_token and session_token in _PREPAY_SESSIONS:
+            sess = _PREPAY_SESSIONS[session_token]
+            if sess["expires_at"] > time.time() and sess["calls_remaining"] > 0:
+                sess["calls_remaining"] -= 1
+                mcp_allowed = True
+
+        if sig_header:
+            mcp_allowed = True
+
+        if not mcp_allowed:
+            now = time.time()
+            ip_data = _MCP_FREE_CALLS.get(client_ip, {"count": 0, "reset_at": now + 86400})
+            if now > ip_data["reset_at"]:
+                ip_data = {"count": 0, "reset_at": now + 86400}
+            if ip_data["count"] < 3:
+                ip_data["count"] += 1
+                _MCP_FREE_CALLS[client_ip] = ip_data
+                mcp_allowed = True
+
+        if not mcp_allowed:
+            challenge_res = build_bazaar_402_challenge("/mcp", str(request.url))
+            challenge_json = json.loads(challenge_res.body.decode("utf-8"))
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": 402,
+                    "message": "Daily free tool call limit reached (3/3 for automated probers). Attach x402 payment signature or X-Pulse-Session token.",
+                    "data": challenge_json
+                }
+            }, status_code=402, headers=dict(challenge_res.headers))
+
         tool_name = params.get("name")
         args = params.get("arguments") or {}
 

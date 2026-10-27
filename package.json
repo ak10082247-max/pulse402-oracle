@@ -1,6 +1,7 @@
 {
   "name": "pulse402-oracle",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "type": "module",
   "description": "Pulse402 — High-Frequency Consumable x402 Data Oracle on Cloudflare Edge",
   "main": "worker.js",
   "scripts": {

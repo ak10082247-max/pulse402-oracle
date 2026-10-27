@@ -4,15 +4,20 @@
  */
 
 const SERVICE_NAME = "pulse402-oracle";
-const SERVICE_VERSION = "1.1.0";
+const SERVICE_VERSION = "1.2.0";
 const BASE_NETWORK = "eip155:8453";
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const PAYOUT_WALLET = "0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1";
+const SOLANA_NETWORK = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SOLANA_PAYOUT_WALLET = "3tQ4GthjUMqNsyrb1rZMocMHoNewFQWjDUvHZqWeYuCN";
+const SOLANA_FEE_PAYER = "CjNFTjvBhbJJd2B5ePPMHRLx1ELZpa8dwQgGL727eKww";
 const PRICE_USDC = "0.001";
 const PRICE_MICRO = "1000";
 
-// Prepay session storage
+// Prepay session storage & MCP daily free tier tracking
 const PREPAY_SESSIONS = new Map();
+const MCP_FREE_CALLS = new Map();
 
 // CORS Headers
 const CORS_HEADERS = {
@@ -519,15 +524,26 @@ function buildBazaar402Challenge(path, requestUrl) {
     }
   };
 
-  const accepts = [{
-    scheme: "exact",
-    network: BASE_NETWORK,
-    asset: BASE_USDC,
-    amount: PRICE_MICRO,
-    maxTimeoutSeconds: 300,
-    payTo: PAYOUT_WALLET,
-    extra: { name: "USD Coin", version: "2" }
-  }];
+  const accepts = [
+    {
+      scheme: "exact",
+      network: BASE_NETWORK,
+      asset: BASE_USDC,
+      amount: PRICE_MICRO,
+      maxTimeoutSeconds: 300,
+      payTo: PAYOUT_WALLET,
+      extra: { name: "USD Coin", version: "2" }
+    },
+    {
+      scheme: "exact",
+      network: SOLANA_NETWORK,
+      asset: SOLANA_USDC,
+      amount: PRICE_MICRO,
+      maxTimeoutSeconds: 300,
+      payTo: SOLANA_PAYOUT_WALLET,
+      extra: { name: "USD Coin (Solana)", version: "2", feePayer: SOLANA_FEE_PAYER }
+    }
+  ];
 
   const pr = {
     x402Version: 2,
@@ -552,8 +568,11 @@ function buildBazaar402Challenge(path, requestUrl) {
     endpoint: path,
     message: `Payment of ${PRICE_USDC} USDC required. Unpaid access strictly requires valid x402 authorization.`,
     price_usdc: PRICE_USDC,
-    payout_wallet: PAYOUT_WALLET,
-    network: BASE_NETWORK,
+    payout_wallets: {
+      base: PAYOUT_WALLET,
+      solana: SOLANA_PAYOUT_WALLET
+    },
+    networks: [BASE_NETWORK, SOLANA_NETWORK],
     resource: pr.resource,
     accepts: pr.accepts,
     extensions: pr.extensions
@@ -738,6 +757,59 @@ Free developer previews available at GET /v1/preview/{feed}`, {
         }
 
         if (method === "tools/call") {
+          const clientIp = request.headers.get("CF-Connecting-IP") || request.headers.get("x-forwarded-for") || "unknown-client";
+          const sessHeader = request.headers.get("X-Pulse-Session");
+          const sigHeader = request.headers.get("PAYMENT-SIGNATURE") || request.headers.get("X-PAYMENT");
+
+          let mcpAllowed = false;
+          if (sessHeader && PREPAY_SESSIONS.has(sessHeader)) {
+            const s = PREPAY_SESSIONS.get(sessHeader);
+            if (s.expires > Date.now() && s.remaining > 0) {
+              s.remaining -= 1;
+              mcpAllowed = true;
+            }
+          }
+
+          if (sigHeader) {
+            mcpAllowed = true;
+          }
+
+          if (!mcpAllowed) {
+            // Check daily free tier (strictly 3 calls/day for registry scanners e.g. ProtocolProbe / Odel)
+            const now = Date.now();
+            const ipData = MCP_FREE_CALLS.get(clientIp) || { count: 0, resetAt: now + 86400000 };
+            if (now > ipData.resetAt) {
+              ipData.count = 0;
+              ipData.resetAt = now + 86400000;
+            }
+            if (ipData.count < 3) {
+              ipData.count += 1;
+              MCP_FREE_CALLS.set(clientIp, ipData);
+              mcpAllowed = true;
+            }
+          }
+
+          if (!mcpAllowed) {
+            const { b64, jsonBody } = buildBazaar402Challenge("/mcp", request.url);
+            return new Response(JSON.stringify({
+              jsonrpc: "2.0",
+              id,
+              error: {
+                code: 402,
+                message: "Daily free tool call limit exceeded (3 free calls per IP per day for automated scanners). Submit x402 payment or attach X-Pulse-Session token.",
+                data: jsonBody
+              }
+            }), {
+              status: 402,
+              headers: {
+                ...CORS_HEADERS,
+                "Content-Type": "application/json",
+                "PAYMENT-REQUIRED": b64,
+                "X-Payment-Required": b64
+              }
+            });
+          }
+
           const tool = params?.name;
           let content = [];
           if (tool === "pulse_base_liquidity") {
@@ -755,6 +827,12 @@ Free developer previews available at GET /v1/preview/{feed}`, {
           } else if (tool === "pulse_arb_routes") {
             const data = await fetchArbRoutes();
             content = [{ type: "text", text: JSON.stringify(data, null, 2) }];
+          } else {
+            return new Response(JSON.stringify({
+              jsonrpc: "2.0",
+              id,
+              error: { code: -32601, message: `Tool not found: ${tool}` }
+            }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
           }
           return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { content, isError: false } }), {
             headers: { ...CORS_HEADERS, "Content-Type": "application/json" }
@@ -780,24 +858,17 @@ Free developer previews available at GET /v1/preview/{feed}`, {
       const sessHeader = request.headers.get("X-Pulse-Session");
       const sigHeader = request.headers.get("PAYMENT-SIGNATURE") || request.headers.get("X-PAYMENT");
 
-      let allowed = false;
-
-      // Check Session Pass
+      let sessionAllowed = false;
       if (sessHeader && PREPAY_SESSIONS.has(sessHeader)) {
         const s = PREPAY_SESSIONS.get(sessHeader);
         if (s.expires > Date.now() && s.remaining > 0) {
           s.remaining -= 1;
-          allowed = true;
+          sessionAllowed = true;
         }
       }
 
-      // Check x402 Signature
-      if (sigHeader) {
-        allowed = true;
-      }
-
-      // STRICT 402 CHALLENGE for all unpaid calls
-      if (!allowed) {
+      // If unpaid and no session pass, strictly return 402
+      if (!sessionAllowed && !sigHeader) {
         const { b64, jsonBody } = buildBazaar402Challenge(path, request.url);
         return new Response(JSON.stringify(jsonBody), {
           status: 402,
@@ -818,25 +889,6 @@ Free developer previews available at GET /v1/preview/{feed}`, {
         });
       }
 
-      // Execute live feed
-      let data = null;
-      try {
-        const backendRes = await fetch(`https://pulse402-oracle.onrender.com${path}`, {
-          headers: { "User-Agent": "Pulse402-Edge-Gateway/1.0" },
-          cf: { cacheTtl: 5 }
-        });
-        if (backendRes.ok) {
-          const backendJson = await backendRes.json();
-          if (backendJson && backendJson.data) {
-            data = backendJson.data;
-          }
-        }
-      } catch (err) {}
-
-      if (!data) {
-        data = await FEEDS[path]();
-      }
-
       const respHeaders = {
         ...CORS_HEADERS,
         "Content-Type": "application/json",
@@ -845,45 +897,100 @@ Free developer previews available at GET /v1/preview/{feed}`, {
         "X-Pulse-Gateway": "Cloudflare-Edge"
       };
 
+      // If payment signature is provided, verify and settle via PayAI Facilitator (ZERO MOCK / ZERO SYNTHETIC FALLBACK)
       if (sigHeader) {
         let paymentObj = null;
         try {
           const raw = sigHeader.trim();
           paymentObj = JSON.parse(raw.startsWith("{") ? raw : atob(raw));
-        } catch {}
-
-        let txHash = `0x${crypto.randomUUID().replace(/-/g, "")}${crypto.randomUUID().replace(/-/g, "")}`.slice(0, 66);
-        let payer = request.headers.get("X-Payer-Address") || paymentObj?.payload?.from || "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD";
-
-        // Dispatch settlement to PayAI Facilitator if available
-        if (paymentObj && paymentObj.accepted) {
-          try {
-            const settleRes = await fetch("https://facilitator.payai.network/settle", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                x402Version: 2,
-                paymentPayload: paymentObj,
-                paymentRequirements: paymentObj.accepted
-              })
-            });
-            if (settleRes.ok) {
-              const settleJson = await settleRes.json();
-              if (settleJson.transaction) txHash = settleJson.transaction;
-              if (settleJson.payer) payer = settleJson.payer;
-            }
-          } catch (e) {}
+        } catch (e) {
+          return new Response(JSON.stringify({
+            error: "invalid_payment_signature",
+            status: 402,
+            message: "Failed to decode Base64 payment signature or invalid JSON payload"
+          }), { status: 402, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
         }
+
+        if (!paymentObj || (!paymentObj.payload && !paymentObj.transaction)) {
+          return new Response(JSON.stringify({
+            error: "invalid_payment_payload",
+            status: 402,
+            message: "Payment signature missing payload structure"
+          }), { status: 402, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        }
+
+        const net = (paymentObj.accepted?.network || paymentObj.network || "").toString();
+        const isSolana = net.startsWith("solana") || Boolean(paymentObj.payload?.transaction && !paymentObj.payload?.authorization);
+        const meta = BAZAAR_METADATA[path] || BAZAAR_METADATA["/v1/pulse/threat-intel"];
+        const targetRequirements = isSolana ? {
+          scheme: "exact",
+          network: SOLANA_NETWORK,
+          asset: SOLANA_USDC,
+          amount: PRICE_MICRO,
+          maxTimeoutSeconds: 300,
+          payTo: SOLANA_PAYOUT_WALLET,
+          extra: { name: "USD Coin (Solana)", version: "2", feePayer: SOLANA_FEE_PAYER }
+        } : {
+          scheme: "exact",
+          network: BASE_NETWORK,
+          asset: BASE_USDC,
+          amount: PRICE_MICRO,
+          maxTimeoutSeconds: 300,
+          payTo: PAYOUT_WALLET,
+          extra: { name: "USD Coin", version: "2" }
+        };
+
+        let settleData = null;
+        try {
+          const settleRes = await fetch("https://facilitator.payai.network/settle", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              x402Version: 2,
+              paymentPayload: {
+                x402Version: 2,
+                resource: { url: request.url, description: meta.description, mimeType: "application/json" },
+                extensions: paymentObj.extensions,
+                accepted: targetRequirements,
+                payload: paymentObj.payload || { transaction: paymentObj.transaction }
+              },
+              paymentRequirements: targetRequirements
+            })
+          });
+          settleData = await settleRes.json().catch(() => ({}));
+
+          if (!settleRes.ok || !settleData || !settleData.success || !settleData.transaction) {
+            return new Response(JSON.stringify({
+              error: "payment_failed",
+              status: 402,
+              message: settleData.error || settleData.message || "PayAI Facilitator rejected payment authorization or failed to settle on-chain",
+              facilitator_status: settleRes.status,
+              details: settleData
+            }), { status: 402, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+          }
+        } catch (err) {
+          return new Response(JSON.stringify({
+            error: "facilitator_unavailable",
+            status: 402,
+            message: `Could not reach PayAI Facilitator: ${err.message}`
+          }), { status: 402, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        }
+
+        const txHash = settleData.transaction;
+        const payer = settleData.payer || paymentObj.payload?.from || (isSolana ? "solana-payer" : "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD");
+        const settledNetwork = isSolana ? SOLANA_NETWORK : BASE_NETWORK;
 
         const receipt = btoa(JSON.stringify({
           success: true,
           payer,
           transaction: txHash,
           amount: PRICE_MICRO,
-          network: BASE_NETWORK,
+          network: settledNetwork,
           resource: { url: request.url }
         }));
         respHeaders["PAYMENT-RESPONSE"] = receipt;
+        respHeaders["X-Payment-Response"] = receipt;
+      }
         respHeaders["X-Payment-Response"] = receipt;
       }
 
