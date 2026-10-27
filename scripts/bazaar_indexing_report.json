@@ -1,46 +1,62 @@
 [
   {
     "route": "/v1/pulse/base-liquidity",
-    "targetUrl": "https://pulse402-oracle.onrender.com/v1/pulse/base-liquidity",
+    "targetUrl": "https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/base-liquidity",
     "success": true,
     "status": 200,
-    "payer": "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD",
-    "transaction": "0x21d71b1ab92142c6ad1d2f9b8d2ef63a8f34a6ec30fb480298866e7ae836491d",
-    "basescanUrl": "https://basescan.org/tx/0x21d71b1ab92142c6ad1d2f9b8d2ef63a8f34a6ec30fb480298866e7ae836491d",
+    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    "payer": "ExhRWrmNqLHxzPFxnS2e5X82wZZZ79gYqw9zmNwXSPCQ",
+    "transaction": "2EH26s1bL8jGztuZQn9e6n8WibgzsQuJvAx3mXe2zRq9uUrNE5oAHa6dwNv9chxuE976F8zNXCY7cwLDTpJ6G43a",
+    "solscanUrl": "https://solscan.io/tx/2EH26s1bL8jGztuZQn9e6n8WibgzsQuJvAx3mXe2zRq9uUrNE5oAHa6dwNv9chxuE976F8zNXCY7cwLDTpJ6G43a",
+    "solanaSlot": 462252356,
+    "confirmationStatus": "finalized",
+    "latencyMs": 1048,
     "bazaarIndexed": true,
-    "latencyMs": 870
+    "verifiedAt": "2026-10-27T23:13:31.721Z"
   },
   {
     "route": "/v1/pulse/polymarket-velocity",
-    "targetUrl": "https://pulse402-oracle.onrender.com/v1/pulse/polymarket-velocity",
+    "targetUrl": "https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/polymarket-velocity",
     "success": true,
     "status": 200,
-    "payer": "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD",
-    "transaction": "0x22f37926aebc42918ff9a1bafa09947246c79d599dfc4462adb2e9af0af42544",
-    "basescanUrl": "https://basescan.org/tx/0x22f37926aebc42918ff9a1bafa09947246c79d599dfc4462adb2e9af0af42544",
+    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    "payer": "ExhRWrmNqLHxzPFxnS2e5X82wZZZ79gYqw9zmNwXSPCQ",
+    "transaction": "D1eaxd19VyD4PdgjsEDpvbyJojJEA9b4LGQwueeAULdDBYJcTCrKmCHSxjpK3xodbyBNniQRzJmoubrqPeFt4va",
+    "solscanUrl": "https://solscan.io/tx/D1eaxd19VyD4PdgjsEDpvbyJojJEA9b4LGQwueeAULdDBYJcTCrKmCHSxjpK3xodbyBNniQRzJmoubrqPeFt4va",
+    "solanaSlot": 462252369,
+    "confirmationStatus": "finalized",
+    "latencyMs": 1580,
     "bazaarIndexed": true,
-    "latencyMs": 379
+    "verifiedAt": "2026-10-27T23:13:34.649Z"
   },
   {
     "route": "/v1/pulse/threat-intel",
-    "targetUrl": "https://pulse402-oracle.onrender.com/v1/pulse/threat-intel",
+    "targetUrl": "https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/threat-intel",
     "success": true,
     "status": 200,
-    "payer": "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD",
-    "transaction": "0x6cb52782872344c8a685508f72c4e1cdc2e250893ad445e18cda04580f55e89e",
-    "basescanUrl": "https://basescan.org/tx/0x6cb52782872344c8a685508f72c4e1cdc2e250893ad445e18cda04580f55e89e",
+    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    "payer": "ExhRWrmNqLHxzPFxnS2e5X82wZZZ79gYqw9zmNwXSPCQ",
+    "transaction": "2B3r7EFMdmGCYxvBagkvQEhEeB7aKsjLHJG4kxKrzvW78YBeLTd3iMChtez8eWdLrbzGDbfzoZaUUe3N7WDSDVgQ",
+    "solscanUrl": "https://solscan.io/tx/2B3r7EFMdmGCYxvBagkvQEhEeB7aKsjLHJG4kxKrzvW78YBeLTd3iMChtez8eWdLrbzGDbfzoZaUUe3N7WDSDVgQ",
+    "solanaSlot": 462252380,
+    "confirmationStatus": "finalized",
+    "latencyMs": 810,
     "bazaarIndexed": true,
-    "latencyMs": 428
+    "verifiedAt": "2026-10-27T23:13:36.841Z"
   },
   {
     "route": "/v1/pulse/arb-routes",
-    "targetUrl": "https://pulse402-oracle.onrender.com/v1/pulse/arb-routes",
+    "targetUrl": "https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/arb-routes",
     "success": true,
     "status": 200,
-    "payer": "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD",
-    "transaction": "0xc65b23738c2c42efb8e07fca82698fae288a38ca849d4400a05e3ff77d5a8e3a",
-    "basescanUrl": "https://basescan.org/tx/0xc65b23738c2c42efb8e07fca82698fae288a38ca849d4400a05e3ff77d5a8e3a",
+    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    "payer": "ExhRWrmNqLHxzPFxnS2e5X82wZZZ79gYqw9zmNwXSPCQ",
+    "transaction": "3zLZWEc7k9kmoLGv5MUb1bUevCH2KsPpKGvQCB4zEBYyafXfMhxiGJyotuQT5m5VgvsS1CTdPXaPDxEhrHSGZH8Y",
+    "solscanUrl": "https://solscan.io/tx/3zLZWEc7k9kmoLGv5MUb1bUevCH2KsPpKGvQCB4zEBYyafXfMhxiGJyotuQT5m5VgvsS1CTdPXaPDxEhrHSGZH8Y",
+    "solanaSlot": 462252391,
+    "confirmationStatus": "finalized",
+    "latencyMs": 1215,
     "bazaarIndexed": true,
-    "latencyMs": 410
+    "verifiedAt": "2026-10-27T23:13:39.459Z"
   }
 ]

@@ -657,6 +657,209 @@ Free developer previews available at GET /v1/preview/{feed}`, {
       });
     }
 
+    if (path === "/skill.md") {
+      const skillMd = `# Pulse402 Oracle — Autonomous Agent Skill Guide
+
+Pulse402 (\`pulse402-oracle\`) is a high-frequency, consumable x402 data oracle engineered for autonomous AI agents, LLM tool runners, and algorithmic execution bots on Base and Solana.
+
+## Endpoints Overview
+
+| Feed | Paid Path ($0.001 USDC) | Free Preview Path | Description |
+| :--- | :--- | :--- | :--- |
+| **Base Liquidity** | \`/v1/pulse/base-liquidity\` | \`/v1/preview/base-liquidity\` | Pool reserve deltas, 60s netflow velocity, tax status & slippage quotes across Aerodrome & Uniswap V3 |
+| **Polymarket Velocity** | \`/v1/pulse/polymarket-velocity\` | \`/v1/preview/polymarket-velocity\` | Probability velocity (>2% in 5m), bid/ask imbalances, whale order flow signals |
+| **Threat Intel** | \`/v1/pulse/threat-intel\` | \`/v1/preview/threat-intel\` | Rolling Base honeypot contracts, malicious spenders & prompt-injection sanitization |
+| **Arbitrage Routes** | \`/v1/pulse/arb-routes\` | \`/v1/preview/arb-routes\` | Cross-DEX spreads, smart routing paths & simulated net profit after fees & gas |
+
+## Connection Options
+
+### 1. Model Context Protocol (MCP) Remote Server
+Connect any MCP-compatible agent (Claude Desktop, Cursor, OpenClaw, Goose) to:
+- **Server URL**: \`https://pulse402-oracle.ak10082247.workers.dev/mcp\`
+- **Protocol**: MCP JSON-RPC 2.0 via HTTP POST
+- **Tools**:
+  - \`pulse_base_liquidity\`: Fetch Aerodrome/Uniswap v3 reserves and slippage
+  - \`pulse_polymarket_velocity\`: Stream high-velocity prediction market shifts
+  - \`pulse_threat_intel\`: Check token honeypot status and sanitize untrusted inputs
+  - \`pulse_arb_routes\`: Detect live profitable arbitrage opportunities
+
+### 2. Free Previews (Zero Auth)
+Agents can test live feeds without payment credentials:
+\`\`\`bash
+curl -s https://pulse402-oracle.ak10082247.workers.dev/v1/preview/base-liquidity
+\`\`\`
+
+### 3. Paid x402 V2 Toll Settlement ($0.001 USDC)
+Querying any \`/v1/pulse/*\` route without authorization returns \`HTTP 402 Payment Required\` with payment instructions in the \`PAYMENT-REQUIRED\` header:
+- **Base Mainnet (\`eip155:8453\`)**: Sign an EIP-712 \`TransferWithAuthorization\` (EIP-3009) to Merchant \`${PAYOUT_WALLET}\` for \`1000\` micro-USDC ($0.001 USDC) on asset \`${BASE_USDC}\`.
+- **Solana Mainnet (\`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp\`)**: Partially sign a v0 \`VersionedTransaction\` with SPL \`TransferChecked\` for \`1000\` micro-USDC to ATA \`3shUSbf9mkGabKqa2pdV7ZrstYvHozwusurLLuugf4dc\` (Merchant \`${SOLANA_PAYOUT_WALLET}\`), sponsored by feePayer \`${SOLANA_FEE_PAYER}\`.
+- Send the Base64 JSON payload in \`PAYMENT-SIGNATURE\` or \`X-PAYMENT\` header.
+`;
+      return new Response(skillMd, {
+        headers: { ...CORS_HEADERS, "Content-Type": "text/markdown; charset=UTF-8" }
+      });
+    }
+
+    if (path === "/.well-known/agent-card.json") {
+      return new Response(JSON.stringify({
+        $schema: "https://a2a.dev/v1/agent-card.json",
+        name: "pulse402-oracle",
+        description: "High-Frequency Consumable x402 Data Oracle delivering real-time Base DEX liquidity, Polymarket probability velocity, and cross-DEX arbitrage routes for AI agents.",
+        version: SERVICE_VERSION,
+        url: url.origin,
+        provider: {
+          name: "Kurox Fleet",
+          url: "https://github.com/ak10082247-max/pulse402-oracle"
+        },
+        capabilities: {
+          mcp: {
+            endpoint: `${url.origin}/mcp`,
+            version: "2024-11-05",
+            registryId: "io.github.ak10082247-max/pulse402-oracle"
+          },
+          x402: {
+            version: 2,
+            supportedChains: [
+              BASE_NETWORK,
+              SOLANA_NETWORK
+            ],
+            pricePerCallUsdc: PRICE_USDC
+          }
+        },
+        skills: [
+          "crypto-market-data",
+          "threat-intel",
+          "polymarket-velocity",
+          "arbitrage-radar"
+        ],
+        securitySchemes: {
+          x402PaymentSignature: {
+            type: "apiKey",
+            in: "header",
+            name: "X-PAYMENT",
+            description: "Base64-encoded x402 V2 payment authorization (Base EIP-3009 or Solana SPL transfer)"
+          }
+        },
+        endpoints: [
+          { path: "/v1/pulse/base-liquidity", method: "GET", price: "$0.001 USDC", description: "Base DEX liquidity, reserves, and slippage quotes" },
+          { path: "/v1/pulse/polymarket-velocity", method: "GET", price: "$0.001 USDC", description: "Polymarket probability shifts and whale orderflow" },
+          { path: "/v1/pulse/threat-intel", method: "GET", price: "$0.001 USDC", description: "Rolling Base honeypots and prompt sanitization" },
+          { path: "/v1/pulse/arb-routes", method: "GET", price: "$0.001 USDC", description: "Cross-DEX arbitrage routes and profitability simulation" },
+          { path: "/v1/preview/base-liquidity", method: "GET", price: "Free", description: "Unauthenticated preview of Base DEX liquidity" },
+          { path: "/v1/preview/polymarket-velocity", method: "GET", price: "Free", description: "Unauthenticated preview of Polymarket velocity" },
+          { path: "/v1/preview/threat-intel", method: "GET", price: "Free", description: "Unauthenticated preview of threat intel" },
+          { path: "/v1/preview/arb-routes", method: "GET", price: "Free", description: "Unauthenticated preview of arb routes" }
+        ]
+      }, null, 2), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+    }
+
+    if (path === "/openapi.json") {
+      return new Response(JSON.stringify({
+        openapi: "3.1.0",
+        info: {
+          title: "Pulse402 High-Frequency Consumable x402 Data Oracle",
+          version: SERVICE_VERSION,
+          description: "High-Frequency Consumable x402 Data Oracle delivering real-time Base DEX liquidity, Polymarket probability velocity, rolling threat intelligence, and cross-DEX arbitrage routes for AI agents."
+        },
+        servers: [
+          { url: url.origin, description: "Current Edge Gateway" },
+          { url: "https://pulse402-oracle.ak10082247.workers.dev", description: "Cloudflare Edge Gateway" },
+          { url: "https://pulse402-oracle.onrender.com", description: "Render Origin Engine" }
+        ],
+        paths: {
+          "/v1/pulse/base-liquidity": {
+            get: {
+              summary: "Base DEX Liquidity & Reserves Feed",
+              description: "Real-time pool reserve deltas, 60s netflow velocity, tax status & slippage quotes.",
+              security: [{ x402PaymentSignature: [] }],
+              responses: {
+                "200": { description: "Live feed data with cryptographic receipt" },
+                "402": { description: "Payment Required ($0.001 USDC)" }
+              }
+            }
+          },
+          "/v1/pulse/polymarket-velocity": {
+            get: {
+              summary: "Polymarket Probability Velocity Feed",
+              description: "5-minute probability shifts >2%, bid/ask orderbook depth & whale signals.",
+              security: [{ x402PaymentSignature: [] }],
+              responses: {
+                "200": { description: "Live feed data with cryptographic receipt" },
+                "402": { description: "Payment Required ($0.001 USDC)" }
+              }
+            }
+          },
+          "/v1/pulse/threat-intel": {
+            get: {
+              summary: "Threat Intel & Malicious Contract Feed",
+              description: "Rolling Base honeypots, malicious spenders & deterministic prompt sanitization.",
+              security: [{ x402PaymentSignature: [] }],
+              responses: {
+                "200": { description: "Live feed data with cryptographic receipt" },
+                "402": { description: "Payment Required ($0.001 USDC)" }
+              }
+            }
+          },
+          "/v1/pulse/arb-routes": {
+            get: {
+              summary: "Cross-DEX Arbitrage Routes Feed",
+              description: "Live price discrepancies, swap paths & net profit simulations across Aerodrome and Uniswap V3.",
+              security: [{ x402PaymentSignature: [] }],
+              responses: {
+                "200": { description: "Live feed data with cryptographic receipt" },
+                "402": { description: "Payment Required ($0.001 USDC)" }
+              }
+            }
+          },
+          "/v1/preview/base-liquidity": {
+            get: {
+              summary: "Free Preview: Base DEX Liquidity",
+              description: "Unauthenticated preview data for developers and agent probes.",
+              responses: { "200": { description: "Preview data" } }
+            }
+          },
+          "/v1/preview/polymarket-velocity": {
+            get: {
+              summary: "Free Preview: Polymarket Velocity",
+              description: "Unauthenticated preview data for developers and agent probes.",
+              responses: { "200": { description: "Preview data" } }
+            }
+          },
+          "/v1/preview/threat-intel": {
+            get: {
+              summary: "Free Preview: Threat Intel",
+              description: "Unauthenticated preview data for developers and agent probes.",
+              responses: { "200": { description: "Preview data" } }
+            }
+          },
+          "/v1/preview/arb-routes": {
+            get: {
+              summary: "Free Preview: Arbitrage Routes",
+              description: "Unauthenticated preview data for developers and agent probes.",
+              responses: { "200": { description: "Preview data" } }
+            }
+          },
+          "/mcp": {
+            post: {
+              summary: "MCP JSON-RPC 2.0 Endpoint",
+              description: "Model Context Protocol streaming transport for Claude, Cursor, and OpenClaw agents.",
+              responses: { "200": { description: "MCP JSON-RPC response" } }
+            }
+          }
+        },
+        components: {
+          securitySchemes: {
+            x402PaymentSignature: {
+              type: "apiKey",
+              name: "X-PAYMENT",
+              in: "header",
+              description: "Base64-encoded x402 payment signature (EIP-712 TransferWithAuthorization on Base or SPL TransferChecked on Solana)"
+            }
+          }
+        }
+      }, null, 2), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+    }
+
     if (path === "/v1/pass/prepay" && request.method === "POST") {
       const sessId = `pulse_sess_${crypto.randomUUID().replace(/-/g, "")}`;
       PREPAY_SESSIONS.set(sessId, { expires: Date.now() + 86400000 * 7, remaining: 6000 });

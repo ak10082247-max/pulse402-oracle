@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 import httpx
 
@@ -387,6 +388,29 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title="Pulse402 High-Frequency Consumable x402 Data Oracle",
+        version=SERVICE_VERSION,
+        description="High-Frequency Consumable x402 Data Oracle delivering real-time Base DEX liquidity, Polymarket probability velocity, rolling threat intelligence, and cross-DEX arbitrage routes for AI agents.",
+        routes=app.routes,
+    )
+    openapi_schema["components"] = openapi_schema.get("components", {})
+    openapi_schema["components"]["securitySchemes"] = {
+        "x402PaymentSignature": {
+            "type": "apiKey",
+            "name": "X-PAYMENT",
+            "in": "header",
+            "description": "Base64-encoded x402 payment signature (EIP-712 TransferWithAuthorization on Base or SPL TransferChecked on Solana)"
+        }
+    }
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -621,6 +645,99 @@ Pulse402 is a high-frequency, read-only telemetry oracle that refreshes on-chain
 - Payout Wallet: {PAYOUT_WALLET_ADDRESS}
 - Prepay Session: POST {base_url}/v1/pass/prepay ($5 USDC for 6,000 low-latency calls).
 """)
+
+@app.get("/skill.md")
+async def get_skill_md(request: Request):
+    base_url = str(request.base_url).rstrip("/")
+    skill_content = f"""# Pulse402 Oracle — Autonomous Agent Skill Guide
+
+Pulse402 (`pulse402-oracle`) is a high-frequency, consumable x402 data oracle engineered for autonomous AI agents, LLM tool runners, and algorithmic execution bots on Base and Solana.
+
+## Endpoints Overview
+
+| Feed | Paid Path ($0.001 USDC) | Free Preview Path | Description |
+| :--- | :--- | :--- | :--- |
+| **Base Liquidity** | `/v1/pulse/base-liquidity` | `/v1/preview/base-liquidity` | Pool reserve deltas, 60s netflow velocity, tax status & slippage quotes across Aerodrome & Uniswap V3 |
+| **Polymarket Velocity** | `/v1/pulse/polymarket-velocity` | `/v1/preview/polymarket-velocity` | Probability velocity (>2% in 5m), bid/ask imbalances, whale order flow signals |
+| **Threat Intel** | `/v1/pulse/threat-intel` | `/v1/preview/threat-intel` | Rolling Base honeypot contracts, malicious spenders & prompt-injection sanitization |
+| **Arbitrage Routes** | `/v1/pulse/arb-routes` | `/v1/preview/arb-routes` | Cross-DEX spreads, smart routing paths & simulated net profit after fees & gas |
+
+## Connection Options
+
+### 1. Model Context Protocol (MCP) Remote Server
+Connect any MCP-compatible agent (Claude Desktop, Cursor, OpenClaw, Goose) to:
+- **Server URL**: `{base_url}/mcp`
+- **Protocol**: MCP JSON-RPC 2.0 via HTTP POST
+- **Tools**:
+  - `pulse_base_liquidity`: Fetch Aerodrome/Uniswap v3 reserves and slippage
+  - `pulse_polymarket_velocity`: Stream high-velocity prediction market shifts
+  - `pulse_threat_intel`: Check token honeypot status and sanitize untrusted inputs
+  - `pulse_arb_routes`: Detect live profitable arbitrage opportunities
+
+### 2. Free Previews (Zero Auth)
+Agents can test live feeds without payment credentials:
+```bash
+curl -s {base_url}/v1/preview/base-liquidity
+```
+
+### 3. Paid x402 V2 Toll Settlement ($0.001 USDC)
+Querying any `/v1/pulse/*` route without authorization returns `HTTP 402 Payment Required` with payment instructions in the `PAYMENT-REQUIRED` header:
+- **Base Mainnet (`eip155:8453`)**: Sign an EIP-712 `TransferWithAuthorization` (EIP-3009) to Merchant `{PAYOUT_WALLET_ADDRESS}` for `1000` micro-USDC ($0.001 USDC) on asset `{BASE_USDC}`.
+- **Solana Mainnet (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)**: Partially sign a v0 `VersionedTransaction` with SPL `TransferChecked` for `1000` micro-USDC to ATA `3shUSbf9mkGabKqa2pdV7ZrstYvHozwusurLLuugf4dc` (Merchant `{SOLANA_PAYOUT_WALLET}`), sponsored by feePayer `{SOLANA_FEE_PAYER}`.
+- Send the Base64 JSON payload in `PAYMENT-SIGNATURE` or `X-PAYMENT` header.
+"""
+    return PlainTextResponse(skill_content, media_type="text/markdown; charset=utf-8")
+
+@app.get("/.well-known/agent-card.json")
+async def get_agent_card(request: Request):
+    base_url = str(request.base_url).rstrip("/")
+    return {
+        "$schema": "https://a2a.dev/v1/agent-card.json",
+        "name": "pulse402-oracle",
+        "description": "High-Frequency Consumable x402 Data Oracle delivering real-time Base DEX liquidity, Polymarket probability velocity, and cross-DEX arbitrage routes for AI agents.",
+        "version": SERVICE_VERSION,
+        "url": base_url,
+        "provider": {
+            "name": "Kurox Fleet",
+            "url": "https://github.com/ak10082247-max/pulse402-oracle"
+        },
+        "capabilities": {
+            "mcp": {
+                "endpoint": f"{base_url}/mcp",
+                "version": "2024-11-05",
+                "registryId": "io.github.ak10082247-max/pulse402-oracle"
+            },
+            "x402": {
+                "version": 2,
+                "supportedChains": [BASE_NETWORK, SOLANA_NETWORK],
+                "pricePerCallUsdc": PRICE_PER_CALL_USDC
+            }
+        },
+        "skills": [
+            "crypto-market-data",
+            "threat-intel",
+            "polymarket-velocity",
+            "arbitrage-radar"
+        ],
+        "securitySchemes": {
+            "x402PaymentSignature": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-PAYMENT",
+                "description": "Base64-encoded x402 V2 payment authorization (Base EIP-3009 or Solana SPL transfer)"
+            }
+        },
+        "endpoints": [
+            {"path": "/v1/pulse/base-liquidity", "method": "GET", "price": "$0.001 USDC", "description": "Base DEX liquidity, reserves, and slippage quotes"},
+            {"path": "/v1/pulse/polymarket-velocity", "method": "GET", "price": "$0.001 USDC", "description": "Polymarket probability shifts and whale orderflow"},
+            {"path": "/v1/pulse/threat-intel", "method": "GET", "price": "$0.001 USDC", "description": "Rolling Base honeypots and prompt sanitization"},
+            {"path": "/v1/pulse/arb-routes", "method": "GET", "price": "$0.001 USDC", "description": "Cross-DEX arbitrage routes and profitability simulation"},
+            {"path": "/v1/preview/base-liquidity", "method": "GET", "price": "Free", "description": "Unauthenticated preview of Base DEX liquidity"},
+            {"path": "/v1/preview/polymarket-velocity", "method": "GET", "price": "Free", "description": "Unauthenticated preview of Polymarket velocity"},
+            {"path": "/v1/preview/threat-intel", "method": "GET", "price": "Free", "description": "Unauthenticated preview of threat intel"},
+            {"path": "/v1/preview/arb-routes", "method": "GET", "price": "Free", "description": "Unauthenticated preview of arb routes"}
+        ]
+    }
 
 # ==============================================================================
 # DEDICATED FREE PREVIEW ROUTES (For Developers, Dashboards, Previews)
