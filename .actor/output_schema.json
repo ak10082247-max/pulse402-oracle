@@ -8,7 +8,6 @@
       "type": "string",
       "title": "Results Dataset",
       "description": "Dataset containing all scraped and streamed oracle feed items",
-      "resourceType": "dataset",
       "template": "{{links.apiDefaultDatasetUrl}}/items"
     }
   }
