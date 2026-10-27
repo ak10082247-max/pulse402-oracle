@@ -660,7 +660,7 @@ const HTML_DASHBOARD = `<!DOCTYPE html>
   "mcpServers": {
     "pulse402": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "${location.origin}/mcp"]
+      "args": ["-y", "mcp-remote", "https://pulse402-oracle.onrender.com/mcp"]
     }
   }
 }</pre>
