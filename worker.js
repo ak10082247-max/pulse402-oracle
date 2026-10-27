@@ -537,13 +537,32 @@ Priced at $0.001 USDC on Base (${BASE_NETWORK}). Payout: ${PAYOUT_WALLET}`, {
         });
       }
 
-      // Execute feed
-      const data = await FEEDS[path]();
+      // Execute feed via Hybrid Backend / Edge Engine
+      let data = null;
+      try {
+        const backendRes = await fetch(`https://pulse402-oracle.onrender.com${path}`, {
+          headers: { "User-Agent": "Pulse402-Edge-Gateway/1.0" },
+          cf: { cacheTtl: 5 }
+        });
+        if (backendRes.ok) {
+          const backendJson = await backendRes.json();
+          if (backendJson && backendJson.data) {
+            data = backendJson.data;
+          }
+        }
+      } catch (err) {}
+
+      // Fall back to direct edge fetch if backend is warming
+      if (!data) {
+        data = await FEEDS[path]();
+      }
+
       const respHeaders = {
         ...CORS_HEADERS,
         "Content-Type": "application/json",
         "Cache-Control": "no-store, max-age=10",
-        "X-Pulse-TTL": "10"
+        "X-Pulse-TTL": "10",
+        "X-Pulse-Gateway": "Cloudflare-Edge"
       };
 
       if (hasSig) {
