@@ -991,8 +991,6 @@ Free developer previews available at GET /v1/preview/{feed}`, {
         respHeaders["PAYMENT-RESPONSE"] = receipt;
         respHeaders["X-Payment-Response"] = receipt;
       }
-        respHeaders["X-Payment-Response"] = receipt;
-      }
 
       return new Response(JSON.stringify({
         status: "ok",
