@@ -1,0 +1,65 @@
+{
+  "actorSpecification": 1,
+  "title": "Pulse402 Oracle Feed Dataset",
+  "description": "Real-time non-cacheable data points from Base DEX liquidity, Polymarket probability velocity, security intelligence, and cross-DEX arb routes.",
+  "fields": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": true,
+    "required": ["feed", "timestamp_ms"],
+    "properties": {
+      "status": {
+        "type": "string",
+        "title": "Status",
+        "description": "Feed response status",
+        "example": "ok",
+        "nullable": false
+      },
+      "feed": {
+        "type": "string",
+        "title": "Feed Endpoint",
+        "description": "Endpoint URL or feed identifier",
+        "example": "/v1/pulse/base-liquidity",
+        "nullable": false
+      },
+      "timestamp_ms": {
+        "type": "number",
+        "title": "Timestamp (ms)",
+        "description": "Unix timestamp in milliseconds of oracle refresh",
+        "example": 1730000000000,
+        "nullable": false
+      },
+      "ttl_seconds": {
+        "type": "number",
+        "title": "Freshness TTL",
+        "description": "Maximum seconds before feed data expires",
+        "example": 10,
+        "nullable": true
+      },
+      "data": {
+        "type": "array",
+        "title": "Payload",
+        "description": "Parsed payload array or object",
+        "nullable": true
+      }
+    }
+  },
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "description": "Core oracle telemetries and market signals",
+      "transformation": {
+        "fields": ["feed", "status", "timestamp_ms", "ttl_seconds"]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "feed": { "label": "Feed Endpoint" },
+          "status": { "label": "Status" },
+          "timestamp_ms": { "label": "Timestamp (ms)" },
+          "ttl_seconds": { "label": "TTL (s)" }
+        }
+      }
+    }
+  }
+}

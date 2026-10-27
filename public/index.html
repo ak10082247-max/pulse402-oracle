@@ -20,8 +20,9 @@
     .feed-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
     .feed-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
     .feed-name { font-size: 14px; font-weight: bold; color: #fff; }
+    .btn-group { display: flex; gap: 8px; }
     pre { background: #05070c; border: 1px solid #1f2937; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 12px; color: #a7f3d0; max-height: 220px; }
-    .btn { background: var(--accent); color: #050811; font-weight: bold; padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer; text-decoration: none; display: inline-block; font-size: 12px; }
+    .btn { background: var(--accent); color: #050811; font-weight: bold; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; text-decoration: none; display: inline-block; font-size: 11px; }
     footer { text-align: center; font-size: 12px; color: #6b7280; border-top: 1px solid var(--border); padding-top: 18px; margin-top: 24px; }
   </style>
 </head>
@@ -49,33 +50,45 @@
       <div class="feed-card">
         <div class="feed-header">
           <span class="feed-name">1. /v1/pulse/base-liquidity (Aerodrome & Uniswap v3 Reserves & Slippage)</span>
-          <a href="/v1/pulse/base-liquidity" class="btn" target="_blank">Fetch Feed</a>
+          <div class="btn-group">
+            <a href="/v1/pulse/base-liquidity" class="btn" target="_blank">x402 Paid Route</a>
+            <a href="/v1/preview/base-liquidity" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
+          </div>
         </div>
-        <pre id="preLiquidity">{"status": "polling_edge", "loading": true}</pre>
+        <pre id="preLiquidity">{"status": "polling_preview", "loading": true}</pre>
       </div>
 
       <div class="feed-card">
         <div class="feed-header">
           <span class="feed-name">2. /v1/pulse/polymarket-velocity (Markets Moving &gt;2% in 5 min)</span>
-          <a href="/v1/pulse/polymarket-velocity" class="btn" target="_blank">Fetch Feed</a>
+          <div class="btn-group">
+            <a href="/v1/pulse/polymarket-velocity" class="btn" target="_blank">x402 Paid Route</a>
+            <a href="/v1/preview/polymarket-velocity" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
+          </div>
         </div>
-        <pre id="prePolymarket">{"status": "polling_edge", "loading": true}</pre>
+        <pre id="prePolymarket">{"status": "polling_preview", "loading": true}</pre>
       </div>
 
       <div class="feed-card">
         <div class="feed-header">
           <span class="feed-name">3. /v1/pulse/threat-intel (Base Honeypot Contracts & Malicious Spenders)</span>
-          <a href="/v1/pulse/threat-intel" class="btn" target="_blank">Fetch Feed</a>
+          <div class="btn-group">
+            <a href="/v1/pulse/threat-intel" class="btn" target="_blank">x402 Paid Route</a>
+            <a href="/v1/preview/threat-intel" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
+          </div>
         </div>
-        <pre id="preThreat">{"status": "polling_edge", "loading": true}</pre>
+        <pre id="preThreat">{"status": "polling_preview", "loading": true}</pre>
       </div>
 
       <div class="feed-card">
         <div class="feed-header">
           <span class="feed-name">4. /v1/pulse/arb-routes (Live Cross-DEX Spreads & Smart-Router Paths)</span>
-          <a href="/v1/pulse/arb-routes" class="btn" target="_blank">Fetch Feed</a>
+          <div class="btn-group">
+            <a href="/v1/pulse/arb-routes" class="btn" target="_blank">x402 Paid Route</a>
+            <a href="/v1/preview/arb-routes" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
+          </div>
         </div>
-        <pre id="preArb">{"status": "polling_edge", "loading": true}</pre>
+        <pre id="preArb">{"status": "polling_preview", "loading": true}</pre>
       </div>
     </div>
 
@@ -106,18 +119,18 @@
         document.getElementById(elId).textContent = JSON.stringify({ error: String(e) }, null, 2);
       }
     }
-    loadFeed('/v1/pulse/base-liquidity', 'preLiquidity');
-    loadFeed('/v1/pulse/polymarket-velocity', 'prePolymarket');
-    loadFeed('/v1/pulse/threat-intel', 'preThreat');
-    loadFeed('/v1/pulse/arb-routes', 'preArb');
+    loadFeed('/v1/preview/base-liquidity', 'preLiquidity');
+    loadFeed('/v1/preview/polymarket-velocity', 'prePolymarket');
+    loadFeed('/v1/preview/threat-intel', 'preThreat');
+    loadFeed('/v1/preview/arb-routes', 'preArb');
 
     let counter = 10;
     setInterval(() => {
       counter = counter <= 1 ? 10 : counter - 1;
       document.getElementById('ttlCounter').textContent = counter + 's TTL';
       if (counter === 10) {
-        loadFeed('/v1/pulse/base-liquidity', 'preLiquidity');
-        loadFeed('/v1/pulse/arb-routes', 'preArb');
+        loadFeed('/v1/preview/base-liquidity', 'preLiquidity');
+        loadFeed('/v1/preview/arb-routes', 'preArb');
       }
     }, 1000);
   </script>

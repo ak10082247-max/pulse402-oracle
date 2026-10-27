@@ -9,7 +9,12 @@
   },
   "pricing": {
     "pricingModel": "PAY_PER_EVENT",
-    "pricePerUnitUsd": 0.01
+    "pricePerUnitUsd": 0.02
   },
+  "categories": [
+    "AI",
+    "AGENTS",
+    "MCP_SERVERS"
+  ],
   "input": "./input_schema.json"
 }
