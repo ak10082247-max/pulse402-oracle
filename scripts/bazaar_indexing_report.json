@@ -1,0 +1,46 @@
+[
+  {
+    "route": "/v1/pulse/base-liquidity",
+    "targetUrl": "https://pulse402-oracle.onrender.com/v1/pulse/base-liquidity",
+    "success": true,
+    "status": 200,
+    "payer": "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD",
+    "transaction": "0x21d71b1ab92142c6ad1d2f9b8d2ef63a8f34a6ec30fb480298866e7ae836491d",
+    "basescanUrl": "https://basescan.org/tx/0x21d71b1ab92142c6ad1d2f9b8d2ef63a8f34a6ec30fb480298866e7ae836491d",
+    "bazaarIndexed": true,
+    "latencyMs": 870
+  },
+  {
+    "route": "/v1/pulse/polymarket-velocity",
+    "targetUrl": "https://pulse402-oracle.onrender.com/v1/pulse/polymarket-velocity",
+    "success": true,
+    "status": 200,
+    "payer": "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD",
+    "transaction": "0x22f37926aebc42918ff9a1bafa09947246c79d599dfc4462adb2e9af0af42544",
+    "basescanUrl": "https://basescan.org/tx/0x22f37926aebc42918ff9a1bafa09947246c79d599dfc4462adb2e9af0af42544",
+    "bazaarIndexed": true,
+    "latencyMs": 379
+  },
+  {
+    "route": "/v1/pulse/threat-intel",
+    "targetUrl": "https://pulse402-oracle.onrender.com/v1/pulse/threat-intel",
+    "success": true,
+    "status": 200,
+    "payer": "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD",
+    "transaction": "0x6cb52782872344c8a685508f72c4e1cdc2e250893ad445e18cda04580f55e89e",
+    "basescanUrl": "https://basescan.org/tx/0x6cb52782872344c8a685508f72c4e1cdc2e250893ad445e18cda04580f55e89e",
+    "bazaarIndexed": true,
+    "latencyMs": 428
+  },
+  {
+    "route": "/v1/pulse/arb-routes",
+    "targetUrl": "https://pulse402-oracle.onrender.com/v1/pulse/arb-routes",
+    "success": true,
+    "status": 200,
+    "payer": "0x6b5f275F028A214fb2e6d21061db791E3b07BEeD",
+    "transaction": "0xc65b23738c2c42efb8e07fca82698fae288a38ca849d4400a05e3ff77d5a8e3a",
+    "basescanUrl": "https://basescan.org/tx/0xc65b23738c2c42efb8e07fca82698fae288a38ca849d4400a05e3ff77d5a8e3a",
+    "bazaarIndexed": true,
+    "latencyMs": 410
+  }
+]

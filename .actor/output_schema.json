@@ -1,0 +1,29 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "Pulse402 Oracle Output Schema",
+  "description": "Real-time non-cacheable telemetry oracle data points",
+  "type": "object",
+  "properties": {
+    "feed": {
+      "type": "string",
+      "title": "Feed Endpoint",
+      "description": "The oracle feed endpoint"
+    },
+    "status": {
+      "type": "string",
+      "title": "Status"
+    },
+    "timestamp_ms": {
+      "type": "integer",
+      "title": "Timestamp (ms)"
+    },
+    "ttl_seconds": {
+      "type": "integer",
+      "title": "TTL (seconds)"
+    },
+    "data": {
+      "type": "array",
+      "title": "Data Items"
+    }
+  }
+}
