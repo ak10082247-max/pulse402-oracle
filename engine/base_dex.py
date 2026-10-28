@@ -20,7 +20,8 @@ TOKENS = {
 }
 TOKENS = {key: value.lower() for key, value in TOKENS.items()}
 _CYCLE = None
-_CYCLE_TASK = None
+_CYCLE_TASKS = {}
+_CLIENT_CYCLES = {}
 _BALANCE_HISTORY = {}
 MAX_QUOTE_AGE_MS = 10_000
 MAX_BLOCK_AGE_MS = 20_000
@@ -105,6 +106,38 @@ class CycleQuotes(BaseQuotes):
         self._rpc_queue = []
         self._rpc_batch_task = None
 
+    async def close_pending(self):
+        """Drain shielded read tasks before their owning HTTP client closes."""
+        pending = set(self.calls.values()) | set(self.discovery.values()) | set(self.route_quotes.values())
+        if self._rpc_batch_task is not None:
+            pending.add(self._rpc_batch_task)
+        pending.discard(asyncio.current_task())
+        for task in pending:
+            if not task.done():
+                task.cancel()
+        for _method, _params, future in self._rpc_queue:
+            if not future.done():
+                future.cancel()
+        self._rpc_queue.clear()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    @staticmethod
+    def _retryable_rpc_error(value):
+        rows = value if isinstance(value, list) else [value]
+        for row in rows:
+            error = row.get("error") if isinstance(row, dict) else None
+            if not isinstance(error, dict):
+                continue
+            message = str(error.get("message", "")).lower()
+            # A contract revert is deterministic at the pinned block, not a
+            # provider outage. Never repeat it merely because it is an RPC error.
+            if "revert" in message:
+                continue
+            if error.get("code") in (-32005, -32603) or any(marker in message for marker in ("rate limit", "too many requests", "temporarily unavailable", "node is unhealthy", "server busy", "timeout")):
+                return True
+        return False
+
     async def _select(self, url):
         if self.selected_provider == url:
             return True
@@ -116,6 +149,7 @@ class CycleQuotes(BaseQuotes):
         payload = response.json()
         if (
             response.status_code != 200
+            or not isinstance(payload, dict)
             or payload.get("jsonrpc") != "2.0"
             or payload.get("id") != 1
             or payload.get("error")
@@ -162,8 +196,13 @@ class CycleQuotes(BaseQuotes):
                     continue
                 response = await self.client.post(url, json=payload, timeout=7)
                 if response.status_code == 200:
+                    value = response.json()
+                    if self._retryable_rpc_error(value):
+                        if len(self.provider_errors) < 30:
+                            self.provider_errors.append({"method": "batch" if isinstance(payload, list) else payload["method"], "reason": "RPC_TRANSIENT_ERROR", "block": self.block})
+                        continue
                     self.providers_used.add(url)
-                    return response.json()
+                    return value
                 if len(self.provider_errors) < 30:
                     self.provider_errors.append(
                         {
@@ -376,6 +415,14 @@ class CycleQuotes(BaseQuotes):
 async def _new_cycle(client):
     snapshot = await market_snapshot(client)
     engine = CycleQuotes(client, snapshot)
+    try:
+        return await _initialize_cycle(engine)
+    except BaseException:
+        await engine.close_pending()
+        raise
+
+
+async def _initialize_cycle(engine):
     engine.observed_at_ms = int(time.time() * 1000)
     await engine.setup(TOKENS["USDC"], TOKENS["WETH"])
     if (
@@ -433,22 +480,51 @@ def quote_freshness(engine):
 
 
 async def acquire_quote_cycle(client):
-    global _CYCLE, _CYCLE_TASK
+    global _CYCLE
+    if getattr(client, "is_closed", False):
+        raise QuoteError("CLIENT_CLOSED", "Quote acquisition HTTP client is closed")
     if (
         _CYCLE is not None
         and _CYCLE.client is client
         and 0 <= int(time.time() * 1000) - _CYCLE.observed_at_ms < MAX_QUOTE_AGE_MS
     ):
         return _CYCLE
-    if _CYCLE_TASK is None:
-        _CYCLE_TASK = asyncio.create_task(_new_cycle(client))
-    task = _CYCLE_TASK
+    key = id(client)
+    entry = _CYCLE_TASKS.get(key)
+    if entry is None:
+        entry = {"client": client, "task": asyncio.create_task(_new_cycle(client)), "released": False}
+        _CYCLE_TASKS[key] = entry
+    task = entry["task"]
     try:
-        _CYCLE = await asyncio.shield(task)
+        cycle = await asyncio.shield(task)
+        if entry["released"] or getattr(client, "is_closed", False):
+            raise QuoteError("CLIENT_CLOSED", "Quote acquisition HTTP client closed during setup")
+        _CLIENT_CYCLES[key] = cycle
+        _CYCLE = cycle
         return _CYCLE
     finally:
-        if task.done() and _CYCLE_TASK is task:
-            _CYCLE_TASK = None
+        if task.done() and _CYCLE_TASKS.get(key) is entry:
+            _CYCLE_TASKS.pop(key)
+
+
+async def release_quote_cycle(client):
+    """Cancel this client's setup and read tasks before HTTP scope teardown."""
+    global _CYCLE
+    entry = _CYCLE_TASKS.pop(id(client), None)
+    cycle = _CLIENT_CYCLES.pop(id(client), None)
+    if _CYCLE is not None and _CYCLE.client is client:
+        cycle = cycle or _CYCLE
+        _CYCLE = None
+    if entry is not None:
+        entry["released"] = True
+        task = entry["task"]
+        if not task.done():
+            task.cancel()
+        results = await asyncio.gather(task, return_exceptions=True)
+        if results and not isinstance(results[0], BaseException):
+            cycle = results[0]
+    if cycle is not None and callable(getattr(cycle, "close_pending", None)):
+        await cycle.close_pending()
 
 
 def balance_delta(pool, timestamp_ms, balances):

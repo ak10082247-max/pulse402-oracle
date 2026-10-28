@@ -5,7 +5,7 @@ import copy
 import logging
 import time
 import httpx
-from .base_dex import fetch_base_liquidity_state
+from .base_dex import fetch_base_liquidity_state, release_quote_cycle
 from .polymarket import fetch_polymarket_velocity_state
 from .threat_intel import fetch_threat_intel_state
 from .arb_router import fetch_arb_routes_state
@@ -99,7 +99,10 @@ async def _refresh():
         follow_redirects=False,
         trust_env=False,
     ) as client:
-        await run_single_poll_cycle(client)
+        try:
+            await run_single_poll_cycle(client)
+        finally:
+            await release_quote_cycle(client)
 
 
 async def _refresh_singleflight(feed_name=None):

@@ -397,15 +397,17 @@ def preview_payload(feed_name):
 
 @app.get("/health")
 async def health_check():
+    feeds = {name: get_feed_state(name) for name in FEED_TOOL_MAP.values()}
     return {
         "status": "ok",
         "service": SERVICE_NAME,
         "version": SERVICE_VERSION,
         "revision": os.getenv("RENDER_GIT_COMMIT", "local"),
-        "engine_status": STATE.get("status", "unknown"),
+        "engine_status": "healthy" if all(feed.get("status") == "ok" for feed in feeds.values()) else "degraded",
+        "last_refresh_status": STATE.get("status", "unknown"),
         "last_poll_ms": STATE.get("last_poll_ms", 0),
         "total_poll_cycles": STATE.get("poll_count", 0),
-        "feed_status": {name: {"status": get_feed_state(name).get("status"), "observed_at_ms": get_feed_state(name).get("timestamp_ms")} for name in FEED_TOOL_MAP.values()},
+        "feed_status": {name: {"status": feed.get("status"), "observed_at_ms": feed.get("timestamp_ms"), "age_ms": feed.get("age_ms")} for name, feed in feeds.items()},
         "active_feeds": [
             "/v1/pulse/base-liquidity",
             "/v1/pulse/polymarket-velocity",

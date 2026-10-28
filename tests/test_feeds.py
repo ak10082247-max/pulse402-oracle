@@ -184,7 +184,8 @@ def test_quote_cycle_singleflight_and_client_lifetime(monkeypatch):
         )
 
     monkeypatch.setattr(base_dex, "_CYCLE", None)
-    monkeypatch.setattr(base_dex, "_CYCLE_TASK", None)
+    monkeypatch.setattr(base_dex, "_CYCLE_TASKS", {})
+    monkeypatch.setattr(base_dex, "_CLIENT_CYCLES", {})
     monkeypatch.setattr(base_dex, "_new_cycle", create)
 
     async def run():
@@ -198,6 +199,141 @@ def test_quote_cycle_singleflight_and_client_lifetime(monkeypatch):
 
     asyncio.run(run())
     assert len(created) == 2
+
+
+def test_cancelled_setup_cannot_cross_into_new_client_and_release_drains_owner(monkeypatch):
+    monkeypatch.setattr(base_dex, "_CYCLE", None)
+    monkeypatch.setattr(base_dex, "_CYCLE_TASKS", {})
+    monkeypatch.setattr(base_dex, "_CLIENT_CYCLES", {})
+
+    async def run():
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+        old = SimpleNamespace(name="old", is_closed=False)
+        current = SimpleNamespace(name="current", is_closed=False)
+        calls = []
+
+        async def setup(client):
+            calls.append(client.name)
+            if client is old:
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+            return SimpleNamespace(client=client, observed_at_ms=int(time.time() * 1000))
+
+        monkeypatch.setattr(base_dex, "_new_cycle", setup)
+        first = asyncio.create_task(base_dex.acquire_quote_cycle(old))
+        await asyncio.wait_for(entered.wait(), 0.5)
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+        old.is_closed = True
+        engine = await asyncio.wait_for(base_dex.acquire_quote_cycle(current), 0.5)
+        assert engine.client is current
+        assert calls == ["old", "current"]
+        await base_dex.release_quote_cycle(old)
+        assert cancelled.is_set()
+        assert base_dex._CYCLE.client is current
+        await base_dex.release_quote_cycle(current)
+        assert base_dex._CYCLE is None
+        assert base_dex._CYCLE_TASKS == base_dex._CLIENT_CYCLES == {}
+
+    asyncio.run(run())
+
+
+def test_setup_cancellation_drains_shielded_engine_reads(monkeypatch):
+    holder = {}
+
+    async def snapshot(client):
+        return {"pools": [], "timestamp_ms": int(time.time() * 1000)}
+
+    async def run():
+        entered = asyncio.Event()
+
+        async def initialize(engine):
+            child = asyncio.create_task(asyncio.Event().wait())
+            engine.calls["read"] = child
+            holder["child"] = child
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(base_dex, "market_snapshot", snapshot)
+        monkeypatch.setattr(base_dex, "_initialize_cycle", initialize)
+        task = asyncio.create_task(base_dex._new_cycle(object()))
+        await asyncio.wait_for(entered.wait(), 0.5)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert holder["child"].cancelled()
+
+    asyncio.run(run())
+
+
+def test_refresh_releases_cancelled_setup_before_http_client_closes(monkeypatch):
+    monkeypatch.setattr(base_dex, "_CYCLE", None)
+    monkeypatch.setattr(base_dex, "_CYCLE_TASKS", {})
+    monkeypatch.setattr(base_dex, "_CLIENT_CYCLES", {})
+    order = []
+
+    class Client:
+        is_closed = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            self.is_closed = True
+            order.append("http_closed")
+
+    async def run():
+        entered = asyncio.Event()
+
+        async def setup(client):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                assert not client.is_closed
+                order.append("setup_drained")
+
+        async def cycle(client):
+            caller = asyncio.create_task(base_dex.acquire_quote_cycle(client))
+            await asyncio.wait_for(entered.wait(), 0.5)
+            caller.cancel()
+            await asyncio.gather(caller, return_exceptions=True)
+            raise RuntimeError("refresh failed")
+
+        monkeypatch.setattr(base_dex, "_new_cycle", setup)
+        monkeypatch.setattr(poller, "run_single_poll_cycle", cycle)
+        monkeypatch.setattr(poller.httpx, "AsyncClient", lambda **kwargs: Client())
+        with pytest.raises(RuntimeError, match="refresh failed"):
+            await poller._refresh()
+        assert order == ["setup_drained", "http_closed"]
+        assert not base_dex._CYCLE_TASKS
+
+    asyncio.run(run())
+
+
+def test_completed_cycle_pending_reads_and_queue_are_drained_on_release(monkeypatch):
+    monkeypatch.setattr(base_dex, "_CYCLE", None)
+    monkeypatch.setattr(base_dex, "_CYCLE_TASKS", {})
+    monkeypatch.setattr(base_dex, "_CLIENT_CYCLES", {})
+
+    async def run():
+        client = SimpleNamespace(is_closed=False)
+        engine = base_dex.CycleQuotes(client, {"pools": []})
+        engine.observed_at_ms = int(time.time() * 1000)
+        child = asyncio.create_task(asyncio.Event().wait())
+        future = asyncio.get_running_loop().create_future()
+        engine.calls["pending"] = child
+        engine._rpc_queue.append(("eth_call", [], future))
+        base_dex._CYCLE = engine
+        base_dex._CLIENT_CYCLES[id(client)] = engine
+        await base_dex.release_quote_cycle(client)
+        assert child.cancelled() and future.cancelled()
+        assert engine._rpc_queue == []
+        assert base_dex._CYCLE is None and not base_dex._CLIENT_CYCLES
+
+    asyncio.run(run())
 
 
 def test_freshness_preserves_original_timestamp_and_failed_refresh_stays_stale(
@@ -492,3 +628,65 @@ def test_rate_limit_failover_requires_same_chain_and_pinned_block_hash(matching_
             host == "mainnet.base.org" and isinstance(body, list)
             for host, body in calls
         )
+
+
+@pytest.mark.parametrize("top_level_error", [False, True])
+@pytest.mark.parametrize("matching_chain,matching_hash", [(True, True), (False, True), (True, False)])
+def test_http200_rpc_rate_limit_fails_over_only_on_same_chain_and_block(top_level_error, matching_chain, matching_hash):
+    calls = []
+    expected_hash = "0x" + "ab" * 32
+
+    def respond(request):
+        payload = json.loads(request.content)
+        primary = request.url.host == "base-rpc.publicnode.com"
+        calls.append((request.url.host, payload))
+        if isinstance(payload, list):
+            if primary:
+                error = {"code": -32005, "message": "rate limit exceeded"}
+                value = {"jsonrpc": "2.0", "id": None, "error": error} if top_level_error else [{"jsonrpc": "2.0", "id": item["id"], "error": error} for item in payload]
+            else:
+                value = [{"jsonrpc": "2.0", "id": item["id"], "result": "0x1234"} for item in payload]
+            return httpx.Response(200, json=value)
+        if payload["method"] == "eth_chainId":
+            value = "0x2105" if primary or matching_chain else "0x1"
+        else:
+            assert payload["method"] == "eth_getBlockByNumber"
+            assert payload["params"] == ["0x64", False]
+            value = {"hash": expected_hash if primary or matching_hash else "0x" + "cd" * 32}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": value})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            engine = base_dex.CycleQuotes(client, {"pools": []})
+            engine.block, engine.block_info = "0x64", {"hash": expected_hash}
+            result = await asyncio.gather(engine.rpc("eth_call", [{"data": "0x01"}, "0x64"]), return_exceptions=True)
+            assert engine.provider_errors[0]["reason"] == "RPC_TRANSIENT_ERROR"
+            return result
+
+    result = asyncio.run(run())
+    fallback_batches = [payload for host, payload in calls if host == "mainnet.base.org" and isinstance(payload, list)]
+    if matching_chain and matching_hash:
+        assert result == ["0x1234"] and len(fallback_batches) == 1
+    else:
+        assert isinstance(result[0], base_dex.QuoteError) and not fallback_batches
+
+
+def test_http200_contract_revert_never_retries_another_provider():
+    calls = []
+
+    def respond(request):
+        calls.append(str(request.url))
+        payload = json.loads(request.content)
+        assert isinstance(payload, list)
+        return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": item["id"], "error": {"code": -32000, "message": "execution reverted"}} for item in payload])
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            engine = base_dex.CycleQuotes(client, {"pools": []})
+            engine.selected_provider = "https://base-rpc.publicnode.com"
+            engine.block = "0x64"
+            return await asyncio.gather(engine.rpc("eth_call", [{"data": "0x01"}, "0x64"]), return_exceptions=True)
+
+    result = asyncio.run(run())
+    assert isinstance(result[0], base_dex.QuoteError)
+    assert calls == ["https://base-rpc.publicnode.com"]
