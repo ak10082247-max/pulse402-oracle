@@ -1,110 +1,590 @@
+"""Shared Base market discovery and pinned, unsigned, exact-amount eth_call quotes."""
+
+import asyncio
+import copy
 import time
+import math
+from collections import deque
+from decimal import Decimal
+
 import httpx
-import logging
-from typing import Dict, Any, List
 
-logger = logging.getLogger("pulse402.base_dex")
+from .base_quotes import BaseQuotes, QuoteError, ADDRESS, UNI_FACTORY
 
-# Base Mainnet token addresses
 TOKENS = {
     "WETH": "0x4200000000000000000000000000000000000006",
     "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "AERO": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
     "DEGEN": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
-    "VIRTUAL": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b"
+    "VIRTUAL": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b",
 }
+TOKENS = {key: value.lower() for key, value in TOKENS.items()}
+_CYCLE = None
+_CYCLE_TASK = None
+_BALANCE_HISTORY = {}
+MAX_QUOTE_AGE_MS = 10_000
+MAX_BLOCK_AGE_MS = 20_000
 
-DEXSCREENER_BASE_URL = "https://api.dexscreener.com/latest/dex/tokens/"
 
-def calculate_slippage(liquidity_usd: float, trade_size_usd: float) -> float:
-    """
-    Calculates expected slippage bps based on constant-product depth approximation:
-    Slippage approx = (Trade Size / (2 * Liquidity)) * 10000 bps
-    """
-    if liquidity_usd <= 0:
-        return 9999.0
-    effective_pool = max(liquidity_usd * 0.5, 1.0)
-    slip_ratio = trade_size_usd / (effective_pool + trade_size_usd)
-    slip_bps = round(slip_ratio * 10000, 2)
-    return min(slip_bps, 10000.0)
+def _number(value):
+    try:
+        number = Decimal(str(value))
+        result = float(number)
+        return (
+            result
+            if number.is_finite() and number >= 0 and math.isfinite(result)
+            else None
+        )
+    except Exception:
+        return None
 
-async def fetch_base_liquidity_state(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
-    """
-    Polls live DEX pools on Base (Aerodrome, Uniswap v3) for top pairs.
-    Calculates reserve deltas, 60s netflow velocity, and slippage for $100 / $1k / $10k.
-    """
-    results = []
-    timestamp_ms = int(time.time() * 1000)
 
-    for symbol, token_addr in TOKENS.items():
-        if symbol == "USDC":
-            continue
+async def market_snapshot(client):
+    """One discovery request per token per cycle, shared by liquidity and routing."""
+
+    async def fetch_token(symbol, token):
         try:
-            url = f"{DEXSCREENER_BASE_URL}{token_addr}"
-            resp = await client.get(url, timeout=4.5)
-            if resp.status_code != 200:
+            response = await client.get(
+                f"https://api.dexscreener.com/token-pairs/v1/base/{token}", timeout=6
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise ValueError("Expected pool list")
+            return symbol, payload, None
+        except (httpx.HTTPError, ValueError, TypeError):
+            return symbol, [], {"symbol": symbol, "error": "DISCOVERY_UNAVAILABLE"}
+
+    acquired = await asyncio.gather(
+        *(
+            fetch_token(symbol, token)
+            for symbol, token in TOKENS.items()
+            if symbol != "USDC"
+        )
+    )
+    pools, errors = {}, []
+    for symbol, payload, error in acquired:
+        if error:
+            errors.append(error)
+        for pool in payload:
+            if (
+                not isinstance(pool, dict)
+                or pool.get("chainId") != "base"
+                or not ADDRESS.fullmatch(str(pool.get("pairAddress", "")))
+            ):
                 continue
-            data = resp.json()
-            pairs = data.get("pairs") or []
-
-            # Filter for Base network pairs
-            base_pairs = [p for p in pairs if p.get("chainId") == "base"]
-            if not base_pairs:
+            addresses = [
+                str((pool.get(key) or {}).get("address", "")).lower()
+                for key in ("baseToken", "quoteToken")
+            ]
+            if (
+                len(set(addresses)) != 2
+                or not all(ADDRESS.fullmatch(address) for address in addresses)
+                or TOKENS[symbol] not in addresses
+            ):
                 continue
+            pools[pool["pairAddress"].lower()] = pool
+    return {
+        "timestamp_ms": int(time.time() * 1000),
+        "pools": list(pools.values()),
+        "errors": errors,
+    }
 
-            # Sort by liquidity USD
-            base_pairs.sort(key=lambda x: float(x.get("liquidity", {}).get("usd", 0) or 0), reverse=True)
-            top_pair = base_pairs[0]
 
-            dex_id = top_pair.get("dexId", "unknown")
-            pair_addr = top_pair.get("pairAddress", "")
-            price_usd = float(top_pair.get("priceUsd", 0) or 0)
-            liq_usd = float(top_pair.get("liquidity", {}).get("usd", 0) or 0)
-            vol_24h = float(top_pair.get("volume", {}).get("h24", 0) or 0)
-            price_change_m5 = float(top_pair.get("priceChange", {}).get("m5", 0) or 0)
-            price_change_h1 = float(top_pair.get("priceChange", {}).get("h1", 0) or 0)
+class CycleQuotes(BaseQuotes):
+    def __init__(self, client, snapshot):
+        super().__init__(client)
+        self.snapshot = snapshot
+        self.calls = {}
+        self.discovery = {}
+        self.route_quotes = {}
+        self.budget = asyncio.Semaphore(6)
+        self.selected_provider = None
+        self.provider_errors = []
+        self.providers_used = set()
+        self._rpc_queue = []
+        self._rpc_batch_task = None
 
-            # 60-second netflow velocity estimation from 5-minute volume & price velocity
-            vol_5m = float(top_pair.get("volume", {}).get("m5", 0) or (vol_24h / 288.0))
-            netflow_sign = 1 if price_change_m5 >= 0 else -1
-            velocity_60s_usd = round(netflow_sign * (vol_5m / 5.0) * (1.0 + abs(price_change_m5) / 100.0), 2)
-
-            # Slippage quotes for $100, $1,000, and $10,000
-            slip_100 = calculate_slippage(liq_usd, 100.0)
-            slip_1000 = calculate_slippage(liq_usd, 1000.0)
-            slip_10000 = calculate_slippage(liq_usd, 10000.0)
-
-            # Honeypot / Transfer tax simulation status (Base tokens verified)
-            is_honeypot = False
-            buy_tax_bps = 0
-            sell_tax_bps = 0
-            if "tax" in top_pair:
-                buy_tax_bps = int(top_pair.get("tax", {}).get("buy", 0) * 100)
-                sell_tax_bps = int(top_pair.get("tax", {}).get("sell", 0) * 100)
-
-            results.append({
-                "symbol": symbol,
-                "token_address": token_addr,
-                "primary_dex": dex_id,
-                "pair_address": pair_addr,
-                "price_usd": price_usd,
-                "liquidity_usd": liq_usd,
-                "volume_24h_usd": vol_24h,
-                "price_delta_5m_pct": price_change_m5,
-                "price_delta_1h_pct": price_change_h1,
-                "netflow_velocity_60s_usd": velocity_60s_usd,
-                "buy_tax_bps": buy_tax_bps,
-                "sell_tax_bps": sell_tax_bps,
-                "is_honeypot": is_honeypot,
-                "slippage_quotes_bps": {
-                    "size_100_usd": slip_100,
-                    "size_1000_usd": slip_1000,
-                    "size_10000_usd": slip_10000
+    async def _select(self, url):
+        if self.selected_provider == url:
+            return True
+        response = await self.client.post(
+            url,
+            json={"jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": []},
+            timeout=5,
+        )
+        payload = response.json()
+        if (
+            response.status_code != 200
+            or payload.get("jsonrpc") != "2.0"
+            or payload.get("id") != 1
+            or payload.get("error")
+            or payload.get("result") != "0x2105"
+        ):
+            return False
+        pinned = getattr(self, "block_info", None)
+        if pinned:
+            response = await self.client.post(
+                url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "eth_getBlockByNumber",
+                    "params": [self.block, False],
                 },
-                "timestamp_ms": timestamp_ms,
-                "ttl_seconds": 10
-            })
-        except Exception as e:
-            logger.warning(f"Failed to fetch Base liquidity for {symbol}: {e}")
+                timeout=5,
+            )
+            observed = (
+                response.json().get("result") if response.status_code == 200 else None
+            )
+            if not isinstance(observed, dict) or observed.get("hash") != pinned.get(
+                "hash"
+            ):
+                return False
+        self.selected_provider = url
+        return True
 
-    return results
+    async def _post_rpc(self, payload):
+        providers = list(
+            dict.fromkeys(
+                [
+                    self.selected_provider,
+                    "https://base-rpc.publicnode.com",
+                    "https://mainnet.base.org",
+                ]
+            )
+        )
+        for url in providers:
+            if not url:
+                continue
+            try:
+                if not await self._select(url):
+                    continue
+                response = await self.client.post(url, json=payload, timeout=7)
+                if response.status_code == 200:
+                    self.providers_used.add(url)
+                    return response.json()
+                if len(self.provider_errors) < 30:
+                    self.provider_errors.append(
+                        {
+                            "method": (
+                                "batch"
+                                if isinstance(payload, list)
+                                else payload["method"]
+                            ),
+                            "http_status": response.status_code,
+                            "block": self.block,
+                        }
+                    )
+            except (httpx.HTTPError, ValueError, TypeError):
+                continue
+        raise QuoteError(
+            "RPC_UNAVAILABLE",
+            "No chain- and block-verified provider completed the read",
+        )
+
+    async def _flush_rpc(self):
+        try:
+            await asyncio.sleep(0.003)
+            while self._rpc_queue:
+                pending, self._rpc_queue = self._rpc_queue[:40], self._rpc_queue[40:]
+                payload = [
+                    {"jsonrpc": "2.0", "id": index, "method": method, "params": params}
+                    for index, (method, params, _future) in enumerate(pending, 1)
+                ]
+                try:
+                    response = await self._post_rpc(payload)
+                    if not isinstance(response, list) or len(response) != len(payload):
+                        raise QuoteError("INVALID_RPC_BATCH", "Incomplete RPC batch")
+                    mapped = {
+                        row.get("id"): row for row in response if isinstance(row, dict)
+                    }
+                    if set(mapped) != set(range(1, len(payload) + 1)) or any(
+                        row.get("jsonrpc") != "2.0" for row in mapped.values()
+                    ):
+                        raise QuoteError(
+                            "INVALID_RPC_BATCH", "RPC IDs do not match requests"
+                        )
+                    for index, (_method, _params, future) in enumerate(pending, 1):
+                        row = mapped[index]
+                        if future.done():
+                            continue
+                        if row.get("error") or "result" not in row:
+                            future.set_exception(
+                                QuoteError(
+                                    "RPC_READ_FAILED",
+                                    "Contract read reverted or was unavailable",
+                                )
+                            )
+                        else:
+                            future.set_result(row["result"])
+                except Exception as error:
+                    for _method, _params, future in pending:
+                        if not future.done():
+                            future.set_exception(error)
+        finally:
+            self._rpc_batch_task = None
+
+    async def rpc(self, method, params):
+        if method == "eth_call":
+            future = asyncio.get_running_loop().create_future()
+            self._rpc_queue.append((method, params, future))
+            if self._rpc_batch_task is None:
+                self._rpc_batch_task = asyncio.create_task(self._flush_rpc())
+            return await asyncio.shield(future)
+        payload = await self._post_rpc(
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        )
+        if (
+            not isinstance(payload, dict)
+            or payload.get("jsonrpc") != "2.0"
+            or payload.get("id") != 1
+            or payload.get("error")
+            or "result" not in payload
+        ):
+            raise QuoteError("RPC_READ_FAILED", "Invalid pinned Base RPC result")
+        return payload["result"]
+
+    async def call(self, address, signature, types=(), values=(), outputs=("uint256",)):
+        key = repr((address.lower(), signature, types, values, outputs))
+        if key not in self.calls:
+            self.calls[key] = asyncio.create_task(
+                super().call(address, signature, types, values, outputs)
+            )
+        return await asyncio.shield(self.calls[key])
+
+    async def discover(self, tin, tout):
+        key = tuple(sorted((tin, tout)))
+        if key not in self.discovery:
+            self.discovery[key] = asyncio.create_task(self._discover(tin, tout))
+        return await asyncio.shield(self.discovery[key])
+
+    async def _discover(self, tin, tout):
+        pools = {}
+        for pool in self.snapshot["pools"]:
+            actual = {
+                str((pool.get(k) or {}).get("address", "")).lower()
+                for k in ("baseToken", "quoteToken")
+            }
+            if actual != {tin, tout}:
+                continue
+            labels = pool.get("labels") or []
+            if not isinstance(labels, list) or not all(
+                isinstance(label, str) for label in labels
+            ):
+                continue
+            supported = (
+                pool.get("dexId") == "uniswap"
+                and "v3" in [label.lower() for label in labels]
+            ) or (
+                pool.get("dexId") == "aerodrome"
+                and not any(
+                    "slip" in label.lower() or label.lower().startswith("cl")
+                    for label in labels
+                )
+            )
+            if supported:
+                pools[pool["pairAddress"].lower()] = {
+                    "pool": pool["pairAddress"].lower(),
+                    "dex": pool["dexId"],
+                    "labels": labels,
+                }
+
+        async def factory(fee):
+            try:
+                pool = (
+                    await self.call(
+                        UNI_FACTORY,
+                        "getPool(address,address,uint24)",
+                        ("address", "address", "uint24"),
+                        (tin, tout, fee),
+                        ("address",),
+                    )
+                )[0]
+                return (
+                    {
+                        "pool": pool.lower(),
+                        "dex": "uniswap",
+                        "labels": ["v3"],
+                        "fee": fee,
+                    }
+                    if int(pool, 16)
+                    else None
+                )
+            except QuoteError:
+                return None
+
+        for pool in await asyncio.gather(
+            *(factory(fee) for fee in (100, 500, 3000, 10000))
+        ):
+            if pool:
+                pools[pool["pool"]] = pool
+        # Canonical factory pools come before provider-labelled candidates. Otherwise
+        # an unsupported CL/v4 listing can crowd every working V3 adapter out.
+        return sorted(
+            pools.values(),
+            key=lambda pool: (0 if "fee" in pool else 1, pool.get("fee", 0)),
+        )[:3]
+
+    async def direct_quotes(self, tin, tout, raw):
+        pools = await self.discover(tin, tout)
+
+        async def quote(pool):
+            try:
+                return await self.quote(pool, tin, tout, raw)
+            except QuoteError:
+                return None
+
+        return [
+            quote
+            for quote in await asyncio.gather(*(quote(pool) for pool in pools))
+            if quote
+        ]
+
+    async def paths(self, tin, tout, raw):
+        key = (tin, tout, raw)
+        if key not in self.route_quotes:
+            self.route_quotes[key] = asyncio.create_task(self._paths(tin, tout, raw))
+        return await asyncio.shield(self.route_quotes[key])
+
+    async def _paths(self, tin, tout, raw):
+        paths = [
+            {
+                "amount_in_raw": str(raw),
+                "amount_out_raw": quote["amount_out_raw"],
+                "legs": [quote],
+            }
+            for quote in await self.direct_quotes(tin, tout, raw)
+        ]
+        weth = TOKENS["WETH"]
+        if weth not in (tin, tout):
+            for first in (await self.direct_quotes(tin, weth, raw))[:2]:
+                for second in (
+                    await self.direct_quotes(weth, tout, int(first["amount_out_raw"]))
+                )[:2]:
+                    if first["pool"] != second["pool"]:
+                        paths.append(
+                            {
+                                "amount_in_raw": str(raw),
+                                "amount_out_raw": second["amount_out_raw"],
+                                "legs": [first, second],
+                            }
+                        )
+        return sorted(paths, key=lambda path: int(path["amount_out_raw"]), reverse=True)
+
+
+async def _new_cycle(client):
+    snapshot = await market_snapshot(client)
+    engine = CycleQuotes(client, snapshot)
+    engine.observed_at_ms = int(time.time() * 1000)
+    await engine.setup(TOKENS["USDC"], TOKENS["WETH"])
+    if (
+        not isinstance(engine.block_info, dict)
+        or engine.block_info.get("number") != engine.block
+        or not __import__("re").fullmatch(
+            r"0x[0-9a-fA-F]{64}", str(engine.block_info.get("hash", ""))
+        )
+    ):
+        raise QuoteError(
+            "INVALID_BLOCK", "Provider did not bind the exact quoted block"
+        )
+    block_age = time.time() - int(engine.block_info["timestamp"], 16)
+    if not -5 <= block_age <= 10:
+        raise QuoteError("STALE_BLOCK", "Provider head is too old for a live feed")
+
+    async def decimals(token):
+        try:
+            return (
+                token,
+                (await engine.call(token, "decimals()", outputs=("uint8",)))[0],
+            )
+        except QuoteError:
+            return token, None
+
+    for token, decimal in await asyncio.gather(
+        *(
+            decimals(token)
+            for key, token in TOKENS.items()
+            if key not in ("USDC", "WETH")
+        )
+    ):
+        if isinstance(decimal, int) and 0 <= decimal <= 255:
+            engine.decimals[token] = decimal
+    return engine
+
+
+def quote_freshness(engine):
+    """Check ages again after quote acquisition, without renewing their timestamp."""
+    now_ms = int(time.time() * 1000)
+    quote_age_ms = now_ms - engine.observed_at_ms
+    block_timestamp_ms = int(engine.block_info["timestamp"], 16) * 1000
+    block_age_ms = now_ms - block_timestamp_ms
+    if not -1_000 <= quote_age_ms < MAX_QUOTE_AGE_MS:
+        raise QuoteError("STALE_QUOTE", "Original quote acquisition has expired")
+    if not -5_000 <= block_age_ms <= MAX_BLOCK_AGE_MS:
+        raise QuoteError("STALE_BLOCK", "Quoted block exceeded the source-age ceiling")
+    return {
+        "quote_observed_at_ms": engine.observed_at_ms,
+        "block_timestamp_ms": block_timestamp_ms,
+        "block_age_at_completion_ms": block_age_ms,
+        "maximum_quote_age_ms": MAX_QUOTE_AGE_MS,
+        "maximum_source_block_age_ms": MAX_BLOCK_AGE_MS,
+    }
+
+
+async def acquire_quote_cycle(client):
+    global _CYCLE, _CYCLE_TASK
+    if (
+        _CYCLE is not None
+        and _CYCLE.client is client
+        and 0 <= int(time.time() * 1000) - _CYCLE.observed_at_ms < MAX_QUOTE_AGE_MS
+    ):
+        return _CYCLE
+    if _CYCLE_TASK is None:
+        _CYCLE_TASK = asyncio.create_task(_new_cycle(client))
+    task = _CYCLE_TASK
+    try:
+        _CYCLE = await asyncio.shield(task)
+        return _CYCLE
+    finally:
+        if task.done() and _CYCLE_TASK is task:
+            _CYCLE_TASK = None
+
+
+def balance_delta(pool, timestamp_ms, balances):
+    history = _BALANCE_HISTORY.setdefault(pool, deque(maxlen=120))
+    prior = next(
+        (row for row in reversed(history) if timestamp_ms - row[0] >= 60_000), None
+    )
+    history.append((timestamp_ms, balances))
+    if prior is None:
+        return {"status": "warming_up", "observed_window_seconds": 0, "delta_raw": None}
+    return {
+        "status": "measured",
+        "observed_window_seconds": (timestamp_ms - prior[0]) / 1000,
+        "delta_raw": {
+            token: str(int(value) - int(prior[1][token]))
+            for token, value in balances.items()
+        },
+        "scope": "Pool ERC20 balance change includes swaps, LP flows and fees; it is not attributed netflow",
+    }
+
+
+async def fetch_base_liquidity_state(client):
+    engine = await acquire_quote_cycle(client)
+
+    async def asset(symbol, token):
+        markets = [
+            p
+            for p in engine.snapshot["pools"]
+            if str((p.get("baseToken") or {}).get("address", "")).lower() == token
+        ]
+        if not markets:
+            return None
+        market = max(
+            markets, key=lambda p: _number((p.get("liquidity") or {}).get("usd")) or 0
+        )
+        quotes = []
+        if token in engine.decimals:
+            sizes = ("1", "100", "1000", "10000")
+            acquired_paths = await asyncio.gather(
+                *(
+                    engine.paths(
+                        TOKENS["USDC"],
+                        token,
+                        int(size) * 10 ** engine.decimals[TOKENS["USDC"]],
+                    )
+                    for size in sizes
+                )
+            )
+            for size, paths in zip(sizes, acquired_paths):
+                if paths:
+                    quotes.append(
+                        {
+                            "notional_usdc": size,
+                            "amount_out_raw": paths[0]["amount_out_raw"],
+                            "minimum_output_raw": str(
+                                int(paths[0]["amount_out_raw"]) * 9950 // 10000
+                            ),
+                            "slippage_tolerance_bps": 50,
+                            "route": paths[0],
+                            "decimals_out": engine.decimals[token],
+                        }
+                    )
+        reference = next((q for q in quotes if q["notional_usdc"] == "1"), None)
+        for quote in quotes:
+            quote["price_impact_vs_one_usdc_bps"] = (
+                float(
+                    (
+                        1
+                        - Decimal(quote["amount_out_raw"])
+                        / Decimal(quote["notional_usdc"])
+                        / Decimal(reference["amount_out_raw"])
+                    )
+                    * 10000
+                )
+                if reference
+                else None
+            )
+        timestamp = min(engine.observed_at_ms, engine.snapshot["timestamp_ms"])
+        balances = {}
+        delta = None
+        pool = market["pairAddress"].lower()
+        try:
+            for key in ("baseToken", "quoteToken"):
+                address = market[key]["address"].lower()
+                balances[address] = str(
+                    (
+                        await engine.call(
+                            address, "balanceOf(address)", ("address",), (pool,)
+                        )
+                    )[0]
+                )
+            delta = balance_delta(pool, timestamp, balances)
+        except QuoteError:
+            pass
+        return {
+            "symbol": symbol,
+            "token_address": token,
+            "primary_dex": market.get("dexId"),
+            "pair_address": pool,
+            "price_usd": _number(market.get("priceUsd")),
+            "liquidity_usd": _number((market.get("liquidity") or {}).get("usd")),
+            "volume_24h_usd": _number((market.get("volume") or {}).get("h24")),
+            "price_delta_5m_pct": (market.get("priceChange") or {}).get("m5"),
+            "pool_token_balances_raw": balances or None,
+            "pool_balance_change": delta,
+            "netflow_velocity_60s_usd": None,
+            "buy_tax_bps": None,
+            "sell_tax_bps": None,
+            "is_honeypot": None,
+            "slippage_quotes_bps": None,
+            "size_quotes_usdc": [q for q in quotes if q["notional_usdc"] != "1"],
+            "timestamp_ms": timestamp,
+            "ttl_seconds": 10,
+            "evidence": {
+                "market_provider": "DexScreener",
+                "market_acquired_at_ms": engine.snapshot["timestamp_ms"],
+                "quote_method": "read_only_eth_call",
+                "block_number": int(engine.block, 16),
+                "block_hash": engine.block_info["hash"],
+                "provider": engine.selected_provider,
+                "pool_balance_scope": "ERC20 balances, not active curve liquidity",
+                "quote_scope": "Acquired direct or WETH two-hop routes; not executed swaps or USD-peg proof",
+                "transfer_tax_status": "not_simulated",
+                **quote_freshness(engine),
+            },
+        }
+
+    rows = await asyncio.gather(
+        *(asset(symbol, token) for symbol, token in TOKENS.items() if symbol != "USDC"),
+        return_exceptions=True,
+    )
+    valid = [row for row in rows if isinstance(row, dict)]
+    quote_freshness(engine)
+    if not any(row["size_quotes_usdc"] for row in valid):
+        raise QuoteError(
+            "QUOTE_ACQUISITION_FAILED",
+            "No exact-amount quote was acquired; market summaries alone do not fulfill this feed",
+        )
+    return valid

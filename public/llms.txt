@@ -1,27 +1,28 @@
-# Pulse402 — High-Frequency Consumable x402 Data Oracle
+# Pulse402 Oracle API Documentation for AI Agents
 
-> Real-time non-cacheable Base DEX liquidity, Polymarket probability velocity, threat intelligence, and cross-DEX arb routes for autonomous AI agents. Refreshed continuously every 15 seconds.
+## Overview
+Pulse402 acquires read-only provider evidence in bounded background cycles and refreshes expired feeds on demand. Each paid response retains its original observation time and a 10-second TTL. Provider outages are reported before settlement.
 
-## Machine Interface Endpoints
-- Base URL: https://pulse402-oracle.onrender.com
-- Cloudflare Edge: https://pulse402-oracle.workers.dev
-- Health: GET /health (Unauthenticated HTTP 200)
-- MCP JSON-RPC 2.0: POST /mcp (Handles initialize, ping, tools/list, tools/call)
-- x402 Manifest: GET /.well-known/x402.json
-- MCP Manifest: GET /.well-known/mcp.json
-- OpenAPI 3.1: GET /openapi.json
+## Endpoints
+- GET https://pulse402-oracle.onrender.com/v1/pulse/base-liquidity : Base liquidity, observed pool balance changes after warm-up, and actual pinned-block USDC quotes for $100 / $1k / $10k.
+- GET https://pulse402-oracle.onrender.com/v1/pulse/polymarket-velocity : Sampled outcome probability movement over five minutes and real displayed orderbook depth; optional minimum movement filter.
+- GET https://pulse402-oracle.onrender.com/v1/pulse/threat-intel : Sampled GoPlus token-risk evidence and scoped deterministic text sanitization; no universal safety guarantee.
+- GET https://pulse402-oracle.onrender.com/v1/pulse/arb-routes : Distinct-pool round-trip quotes on Base with gross spread and explicit unproven execution costs.
 
-## Consumable Feeds (10s TTL, Cache-Control: no-store, max-age=10)
-1. GET /v1/pulse/base-liquidity : Aerodrome & Uniswap v3 reserves, 60s netflow velocity, buy/sell tax status, slippage for $100 / $1k / $10k.
-2. GET /v1/pulse/polymarket-velocity : Prediction markets moving >2% in 5 min, orderbook spread imbalances, whale accumulation signals.
-3. GET /v1/pulse/threat-intel : Base honeypot contracts, malicious approval spenders, deterministic prompt-injection sanitization.
-4. GET /v1/pulse/arb-routes : Executable cross-DEX arbitrage paths on Base with net profit after L2 gas and DEX fees.
+## Free Developer Previews
+- GET https://pulse402-oracle.onrender.com/v1/preview/base-liquidity
+- GET https://pulse402-oracle.onrender.com/v1/preview/polymarket-velocity
+- GET https://pulse402-oracle.onrender.com/v1/preview/threat-intel
+- GET https://pulse402-oracle.onrender.com/v1/preview/arb-routes
+
+## MCP Server Endpoint
+- POST https://pulse402-oracle.onrender.com/mcp : Model Context Protocol JSON-RPC 2.0 HTTP endpoint; discovery is free and tool execution requires payment.
 
 ## Pricing & x402 Micropayments
-- Currency: USDC
-- Network: Base Mainnet (eip155:8453)
-- Token Contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
-- Payout Wallet: 0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1
-- Standard Call: $0.001 USDC
-- HFT Prepay Session Pass: POST /v1/pass/prepay ($5 USDC for 6,000 low-latency calls)
-- Free Tier: 5 free preview calls per IP per day for automated directory indexing.
+- Standard Price: $0.001 USDC per call on Base (eip155:8453) or Solana (solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp).
+- Payout Wallet: 0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6
+- Solana Payout Wallet: 9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh
+- Prepay Session: POST https://pulse402-oracle.onrender.com/v1/pass/prepay ($5 USDC for 6,000 calls valid for seven days, activated only after verified settlement).
+- Free previews expose coverage summaries only. MCP discovery is free; tool execution uses the same payment flow as HTTP.
+- Purchased sessions use X-Pulse-Session and a unique Idempotency-Key per call. Reuse the same key and arguments to recover a response without another credit.
+- Retain the original payment authorization for recovery. A charged=unknown response requires reconciliation; do not sign a replacement payment.

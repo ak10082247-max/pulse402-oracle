@@ -1,92 +1,465 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Pulse402 — High-Frequency Consumable x402 Data Oracle",
-    "description": "Real-time non-cacheable data oracle serving Base DEX liquidity, Polymarket velocity, threat intel, and cross-DEX arb routes for autonomous AI agents.",
-    "version": "1.0.0"
+    "title": "Pulse402 High-Frequency Consumable x402 Data Oracle",
+    "description": "High-Frequency Consumable x402 Data Oracle delivering real-time Base DEX liquidity, Polymarket probability velocity, rolling threat intelligence, and cross-DEX arbitrage routes for AI agents.",
+    "version": "1.3.0"
   },
-  "servers": [
-    {
-      "url": "https://pulse402-oracle.onrender.com",
-      "description": "Render Production Host"
-    }
-  ],
   "paths": {
     "/health": {
       "get": {
-        "summary": "Service health check",
-        "description": "Unauthenticated endpoint returning engine health and active polling status in under 50ms.",
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
         "responses": {
-          "200": { "description": "Service is healthy and polling." }
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
         }
       }
     },
     "/.well-known/x402.json": {
       "get": {
-        "summary": "x402 protocol discovery manifest",
-        "description": "Standard x402 V2 manifest advertising Base Mainnet payment details.",
+        "summary": "X402 Manifest",
+        "operationId": "x402_manifest__well_known_x402_json_get",
         "responses": {
-          "200": { "description": "x402 manifest." }
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/mcp.json": {
+      "get": {
+        "summary": "Mcp Manifest",
+        "operationId": "mcp_manifest__well_known_mcp_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llms.txt": {
+      "get": {
+        "summary": "Llms Txt",
+        "operationId": "llms_txt_llms_txt_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/skill.md": {
+      "get": {
+        "summary": "Get Skill Md",
+        "operationId": "get_skill_md_skill_md_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/agent-card.json": {
+      "get": {
+        "summary": "Get Agent Card",
+        "operationId": "get_agent_card__well_known_agent_card_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/preview/base-liquidity": {
+      "get": {
+        "summary": "Preview Base Liquidity",
+        "operationId": "preview_base_liquidity_v1_preview_base_liquidity_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/preview/polymarket-velocity": {
+      "get": {
+        "summary": "Preview Polymarket Velocity",
+        "operationId": "preview_polymarket_velocity_v1_preview_polymarket_velocity_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/preview/threat-intel": {
+      "get": {
+        "summary": "Preview Threat Intel",
+        "operationId": "preview_threat_intel_v1_preview_threat_intel_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/preview/arb-routes": {
+      "get": {
+        "summary": "Preview Arb Routes",
+        "operationId": "preview_arb_routes_v1_preview_arb_routes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
         }
       }
     },
     "/v1/pulse/base-liquidity": {
       "get": {
-        "summary": "Base DEX pool reserves, netflow velocity & slippage quotes",
-        "description": "Live Aerodrome and Uniswap v3 reserves, 60s netflow velocity, and slippage for $100 / $1k / $10k.",
+        "summary": "Get Base Liquidity",
+        "operationId": "get_base_liquidity_v1_pulse_base_liquidity_get",
         "responses": {
-          "200": { "description": "Live non-cacheable Base DEX liquidity snapshot." },
-          "402": { "description": "Payment Required ($0.001 USDC on Base)." }
-        }
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "402": {
+            "description": "Verified x402 payment or purchased credit required."
+          },
+          "503": {
+            "description": "Fresh fulfillment unavailable or settlement requires recovery; inspect charged field before retrying."
+          }
+        },
+        "description": "Base token liquidity observations, measured pool balance changes after warm-up, and unsigned amount-specific USDC quotes for $100, $1,000 and $10,000, pinned to one verified Base block. Coverage and quote provenance are included.",
+        "security": [
+          {
+            "x402PaymentSignature": []
+          },
+          {
+            "pulseSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional token symbol to filter (e.g. WETH, AERO, DEGEN, VIRTUAL)"
+            }
+          }
+        ]
       }
     },
     "/v1/pulse/polymarket-velocity": {
       "get": {
-        "summary": "Polymarket probability velocity & spread imbalances",
-        "description": "Prediction markets moving >2% in 5 minutes with orderbook spread imbalances and whale signals.",
+        "summary": "Get Polymarket Velocity",
+        "operationId": "get_polymarket_velocity_v1_pulse_polymarket_velocity_get",
         "responses": {
-          "200": { "description": "Live Polymarket velocity snapshot." },
-          "402": { "description": "Payment Required ($0.001 USDC on Base)." }
-        }
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "402": {
+            "description": "Verified x402 payment or purchased credit required."
+          },
+          "503": {
+            "description": "Fresh fulfillment unavailable or settlement requires recovery; inspect charged field before retrying."
+          }
+        },
+        "description": "Sampled active Polymarket outcomes with real CLOB depth, sorted bid/ask spreads and five-minute probability movement from acquired price history. Missing history is explicit; price movement does not identify a trader or whale.",
+        "security": [
+          {
+            "x402PaymentSignature": []
+          },
+          {
+            "pulseSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "min_velocity_pct",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Optional minimum absolute five-minute probability movement (percentage points)"
+            }
+          }
+        ]
       }
     },
     "/v1/pulse/threat-intel": {
       "get": {
-        "summary": "Base honeypot contracts & malicious spenders",
-        "description": "Rolling feed of newly detected honeypot contracts and malicious approval proxies.",
+        "summary": "Get Threat Intel",
+        "operationId": "get_threat_intel_v1_pulse_threat_intel_get",
         "responses": {
-          "200": { "description": "Live threat intelligence feed." },
-          "402": { "description": "Payment Required ($0.001 USDC on Base)." }
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "402": {
+            "description": "Verified x402 payment or purchased credit required."
+          },
+          "503": {
+            "description": "Fresh fulfillment unavailable or settlement requires recovery; inspect charged field before retrying."
+          }
+        },
+        "description": "GoPlus-reported risk assessments for a stated sample of Base tokens, with acquisition times and evidence hashes, plus scoped deterministic text sanitization. Unknown assessments and unavailable spender reputation remain explicit.",
+        "security": [
+          {
+            "x402PaymentSignature": []
+          },
+          {
+            "pulseSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "text_to_sanitize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional untrusted prompt or contract text to inspect and sanitize"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/pulse/threat-intel/sanitize": {
+      "post": {
+        "summary": "Post Threat Sanitize",
+        "operationId": "post_threat_sanitize_v1_pulse_threat_intel_sanitize_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
         }
       }
     },
     "/v1/pulse/arb-routes": {
       "get": {
-        "summary": "Base cross-DEX arbitrage routes",
-        "description": "Real-time price discrepancies and executable smart-router paths between Aerodrome and Uniswap v3.",
+        "summary": "Get Arb Routes",
+        "operationId": "get_arb_routes_v1_pulse_arb_routes_get",
         "responses": {
-          "200": { "description": "Executable arbitrage routes with net profit after fees and gas." },
-          "402": { "description": "Payment Required ($0.001 USDC on Base)." }
-        }
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "402": {
+            "description": "Verified x402 payment or purchased credit required."
+          },
+          "503": {
+            "description": "Fresh fulfillment unavailable or settlement requires recovery; inspect charged field before retrying."
+          }
+        },
+        "description": "Unsigned, amount-specific Base round-trip route quotes across distinct supported pools at one verified block. Gross spread includes quoted pool fees; unproven gas, taxes, execution and MEV costs are not represented as net profit.",
+        "security": [
+          {
+            "x402PaymentSignature": []
+          },
+          {
+            "pulseSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "min_spread_bps",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Optional minimum gross round-trip spread in basis points"
+            }
+          }
+        ]
       }
     },
     "/v1/pass/prepay": {
       "post": {
-        "summary": "Prepay session pass for HFT agents",
-        "description": "Prepay $5 USDC for a 6,000-call low-latency session token (X-Pulse-Session).",
+        "summary": "Prepay Session Pass",
+        "operationId": "prepay_session_pass_v1_pass_prepay_post",
         "responses": {
-          "200": { "description": "Active session pass created." }
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x402PaymentSignature": []
+          }
+        ],
+        "description": "Pay 5 USDC on Base or Solana to activate 6,000 credits for seven days. No credits are minted before confirmed settlement.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
         }
       }
     },
     "/mcp": {
-      "post": {
-        "summary": "Model Context Protocol JSON-RPC 2.0 stream",
-        "description": "Handles initialize, ping, tools/list, and tools/call for MCP clients.",
+      "get": {
+        "summary": "Mcp Get",
+        "operationId": "mcp_get_mcp_get",
         "responses": {
-          "200": { "description": "JSON-RPC response." },
-          "402": { "description": "Payment Required for tool execution." }
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
         }
+      },
+      "post": {
+        "summary": "Mcp Rpc",
+        "operationId": "mcp_rpc_mcp_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "summary": "Version",
+        "operationId": "version_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Live Dashboard",
+        "operationId": "live_dashboard__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "x402PaymentSignature": {
+        "type": "apiKey",
+        "name": "X-PAYMENT",
+        "in": "header",
+        "description": "Base64-encoded x402 payment signature (EIP-712 TransferWithAuthorization on Base or SPL TransferChecked on Solana)"
+      },
+      "pulseSession": {
+        "type": "apiKey",
+        "name": "X-Pulse-Session",
+        "in": "header",
+        "description": "Purchased session token; use a unique Idempotency-Key per delivery and reuse it for retries."
       }
     }
   }

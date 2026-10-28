@@ -1,58 +1,39 @@
-# Pulse402 — The High-Frequency Consumable x402 Data Oracle
+# Pulse402 Oracle
 
-[![Keepalive & Freshness Validator](https://github.com/ak10082247-max/pulse402-oracle/actions/workflows/keepalive.yml/badge.svg)](https://github.com/ak10082247-max/pulse402-oracle/actions/workflows/keepalive.yml)
-[![Cloudflare Workers](https://img.shields.io/badge/Edge-Cloudflare%20Workers-orange)](https://workers.cloudflare.com/)
-[![Base Mainnet](https://img.shields.io/badge/Network-Base%20(8453)-blue)](https://base.org)
-[![x402 Protocol](https://img.shields.io/badge/Protocol-x402%20v2-green)](https://x402.org)
+Read-only Base market quotes, Polymarket books/history and sampled token-risk evidence for agents. The canonical service is https://pulse402-oracle.onrender.com. Feeds retain their original observation timestamps and a 10-second acquisition TTL; expired data is refreshed before delivery. Provider failures are reported before settlement.
 
-> **Pulse402** is a high-frequency, strictly read-only market and security telemetry oracle built for autonomous AI agents, algorithmic trading bots, and Cloudflare's HTTP 402 ecosystem. Refreshes continuously every 15 seconds.
+| Feed | Acquired output | USDC/call |
+| --- | --- | --- |
+| `/v1/pulse/base-liquidity` | Observed liquidity, actual pool balances, measured balance changes after warm-up and pinned-block $100/$1,000/$10,000 USDC quotes on supported pools | 0.001 |
+| `/v1/pulse/polymarket-velocity` | Actual CLOB depth/midpoint and five-minute probability movement from price history, with separate exchange and acquisition times | 0.001 |
+| `/v1/pulse/threat-intel` | GoPlus assessments for the disclosed token sample, evidence hashes and scoped text checks | 0.001 |
+| `/v1/pulse/arb-routes` | Distinct-pool, amount-specific round-trip quotes at one verified Base block, with gross spread | 0.001 |
 
----
+Quotes are unsigned public contract reads. Total execution gas, transfer taxes, MEV, successful fills and net profitability are not established. Unsupported pools and missing evidence are explicit. Displayed price movement does not identify whales. The text sanitizer detects stated patterns and cannot guarantee complete injection prevention. An empty spender list is not an all-clear.
 
-## 1. High-Frequency Consumable Feeds (10s TTL, `Cache-Control: no-store, max-age=10`)
+## Payments
 
-All feeds return live, non-cacheable telemetry with cryptographic `timestamp_ms` and `ttl_seconds: 10`:
+Base and Solana use x402 v2 exact USDC payments. An unpaid request returns HTTP 402 with current server requirements. Use an x402-capable client; this server never needs a customer's private key.
 
-| Endpoint | Primary Domain & Sources | Price (USDC) | Description |
-| :--- | :--- | :---: | :--- |
-| **`/v1/pulse/base-liquidity`** | Aerodrome SlipStream & Uniswap v3 | `$0.001` | Live pool reserves, 60-second netflow velocity, buy/sell tax status, and slippage quotes for $100 / $1,000 / $10,000 trade sizes. |
-| **`/v1/pulse/polymarket-velocity`** | Polymarket Gamma & CLOB Orderbook | `$0.001` | Prediction markets moving >2% in 5 minutes, bid/ask depth spread imbalances, and smart-money accumulation alerts. |
-| **`/v1/pulse/threat-intel`** | BaseScan & DexScreener Heuristics | `$0.001` | Newly flagged Base honeypot contracts, malicious approval spenders, and deterministic prompt-injection sanitization. |
-| **`/v1/pulse/arb-routes`** | Base Cross-DEX Smart Router | `$0.001` | Real-time price discrepancies, executable smart-router paths, and net profit in USDC after fees and Base L2 gas. |
+- Base receiver: `0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6`
+- Solana receiver: `9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh`
+- Solana USDC ATA: `DD3A7jaXFeHcif9eYj6Vhomuxypat5Yxi8ow6wxz27yL`. It must exist before sponsored USDC transfers; a quote alone does not prove account readiness.
+- `POST /v1/pass/prepay` with an empty JSON object purchases 6,000 credits for 5 USDC, valid for seven days. Credits activate only after confirmed settlement.
+- Send a purchased token in `X-Pulse-Session`, with a unique `Idempotency-Key` for each delivery. Retrying identical arguments with the same key recovers the response without another credit.
+- Use the original signed authorization and identical request to recover a pay-per-request result. Never sign a replacement payment when the response says `charged: "unknown"`.
 
----
+The HTTP, sanitizer, prepay and MCP routes share one verified lifecycle: authenticate buyer, claim operation, verify, acquire a valid bounded result, persist preparation, submit settlement once, then commit the receipt/delivery. Ambiguous settlements are retained for reconciliation and never automatically submitted again. Retained completed purchases can recover after authorization expiry.
 
-## 2. Zero-Friction MCP Handshake (<10% Odel/Registry Risk Score)
+Set `PULSE_PAYMENTS_DB=/app/state/payments.sqlite3` on a persistent disk. SQLite uses WAL, full synchronization and owner-fenced operation transitions. The approved Render disk mounts `/app/state`. Ephemeral storage is unsuitable for preserving purchased credits or recovery across redeployments.
 
-* **Neutral Analytical Terminology**: All tool descriptions explicitly state that Pulse402 is a read-only market and security telemetry oracle. It holds zero custody, requires zero private keys, and executes zero state-altering transactions.
-* **Strict Annotations**: Every tool carries `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, and `openWorldHint: true`.
-* **SSRF Guard**: Strict server-side request forgery protection blocking private IP ranges (`127.0.0.1`, `localhost`, `169.254.169.254`, `10.0.0.0/8`, `192.168.0.0/16`).
+## Agent discovery
 
-### Connecting to Claude Desktop / Cursor
-```json
-{
-  "mcpServers": {
-    "pulse402": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://pulse402-oracle.onrender.com/mcp"]
-    }
-  }
-}
-```
+`/openapi.json`, `/llms.txt`, `/skill.md`, `/.well-known/x402.json`, `/.well-known/mcp.json`, `/.well-known/agent-card.json` and MCP discovery are public. `POST /mcp` accepts JSON-RPC discovery and four paid tools. A remote MCP connector provides transport; tool use still needs an x402-capable payment client or purchased session header.
 
----
+Free `/v1/preview/*` routes expose coverage counts and observation health, not priced market records. `/health` distinguishes process health from feed freshness; `/version` exposes the deployed revision.
 
-## 3. Pricing & High-Frequency Session Pass (`POST /v1/pass/prepay`)
+The Cloudflare Worker proxies every route once to the canonical backend. It has no separate payment engine, free tool quota, synthetic feed or session-minting authority. Publish the Worker separately with the authenticated official Wrangler CLI. A Render deployment does not update Cloudflare.
 
-* **Standard Pay-As-You-Go**: `$0.001 USDC` per call via standard x402 headers on Base Mainnet (`eip155:8453`).
-* **Merchant Treasury**: `0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1`
-* **Free Tier Quota**: 5 free preview calls per IP per day for automated directory indexing.
-* **HFT Prepay Pass**: Trading agents can prepay `$5 USDC` at `POST /v1/pass/prepay` for a 6,000-call low-latency session token (`X-Pulse-Session`), enabling 0ms payment overhead on high-frequency 10-second polling loops.
+## Verification
 
----
-
-## 4. Discovery Manifests
-* x402 Pricing Manifest: `GET /.well-known/x402.json`
-* Streamable MCP Manifest: `GET /.well-known/mcp.json`
-* LLM Plaintext Documentation: `GET /llms.txt`
-* OpenAPI 3.1 Spec: `GET /openapi.json`
+Run `python -m pytest tests -q` and `node --test tests/worker.test.mjs`. Tests use isolated databases, deterministic unfunded cryptographic fixtures and mocked transports. They do not submit external payments. The feed engine also supports unsigned public-provider verification without buyer keys or transactions.

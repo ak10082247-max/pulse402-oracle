@@ -1,127 +1,180 @@
-import asyncio
-import time
-import logging
-import sqlite3
-import json
-import httpx
-from typing import Dict, Any, List
+"""Shared on-demand/background feed acquisition with original observation ages."""
 
+import asyncio
+import copy
+import logging
+import time
+import httpx
 from .base_dex import fetch_base_liquidity_state
 from .polymarket import fetch_polymarket_velocity_state
-from .threat_intel import fetch_threat_intel_state, sanitize_untrusted_text
+from .threat_intel import fetch_threat_intel_state
 from .arb_router import fetch_arb_routes_state
 
 logger = logging.getLogger("pulse402.poller")
-
-# In-memory rolling state
-STATE: Dict[str, Any] = {
+TTL_SECONDS = 10
+FEEDS = ("base-liquidity", "polymarket-velocity", "threat-intel", "arb-routes")
+STATE = {
     "base_liquidity": [],
     "polymarket_velocity": [],
     "threat_intel": {},
     "arb_routes": [],
     "last_poll_ms": 0,
     "poll_count": 0,
-    "status": "initializing"
+    "status": "initializing",
 }
+_FEED_SNAPSHOTS = {}
+_ERRORS = {}
+_REFRESH_TASK = None
+_FEED_EVENTS = {}
+FEED_TIMEOUT_SECONDS = 18
+REFRESH_TIMEOUT_SECONDS = 20
 
-DB_PATH = "state/pulse_state.db"
 
 def init_db():
-    import os
-    os.makedirs("state", exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS pulse_snapshots (
-                feed_name TEXT PRIMARY KEY,
-                data_json TEXT NOT NULL,
-                updated_at_ms INTEGER NOT NULL
-            )
-        """)
-        conn.commit()
+    """Legacy persisted rows are not trusted as fresh acquired data."""
 
-def save_snapshot(feed_name: str, data: Any, timestamp_ms: int):
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO pulse_snapshots (feed_name, data_json, updated_at_ms) VALUES (?, ?, ?)",
-                (feed_name, json.dumps(data), timestamp_ms)
-            )
-            conn.commit()
-    except Exception as e:
-        logger.debug(f"Failed to persist state snapshot for {feed_name}: {e}")
 
-async def run_single_poll_cycle(client: httpx.AsyncClient):
-    global STATE
-    now_ms = int(time.time() * 1000)
-
-    try:
-        base_liq, poly_vel, threat, arb = await asyncio.gather(
-            fetch_base_liquidity_state(client),
-            fetch_polymarket_velocity_state(client),
-            fetch_threat_intel_state(),
-            fetch_arb_routes_state(client),
-            return_exceptions=True
-        )
-
-        if isinstance(base_liq, list) and base_liq:
-            STATE["base_liquidity"] = base_liq
-            save_snapshot("base-liquidity", base_liq, now_ms)
-
-        if isinstance(poly_vel, list) and poly_vel:
-            STATE["polymarket_velocity"] = poly_vel
-            save_snapshot("polymarket-velocity", poly_vel, now_ms)
-
-        if isinstance(threat, dict) and threat:
-            STATE["threat_intel"] = threat
-            save_snapshot("threat-intel", threat, now_ms)
-
-        if isinstance(arb, list) and arb:
-            STATE["arb_routes"] = arb
-            save_snapshot("arb-routes", arb, now_ms)
-
-        STATE["last_poll_ms"] = now_ms
-        STATE["poll_count"] += 1
-        STATE["status"] = "healthy"
-        logger.info(f"[Pulse402 Poller] Cycle #{STATE['poll_count']} completed at {now_ms}")
-    except Exception as e:
-        logger.error(f"[Pulse402 Poller] Cycle error: {e}")
-
-async def start_poller_loop(poll_interval_seconds: float = 15.0):
-    """
-    Continuous background loop polling all 4 oracle data feeds every 15 seconds.
-    """
-    init_db()
-    logger.info("[Pulse402 Poller] Starting 15-second background state-refresh engine...")
-    async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": "Pulse402-Oracle-Poller/1.0"}) as client:
-        while True:
-            start_time = time.time()
-            await run_single_poll_cycle(client)
-            elapsed = time.time() - start_time
-            sleep_time = max(0.5, poll_interval_seconds - elapsed)
-            await asyncio.sleep(sleep_time)
-
-def get_feed_state(feed_name: str) -> Dict[str, Any]:
-    """
-    Returns the latest non-cacheable data with cryptographic timestamp_ms and ttl_seconds: 10.
-    """
-    now_ms = int(time.time() * 1000)
-    data = STATE.get(feed_name.replace("-", "_")) or []
-    
-    # If in-memory is empty, try loading from SQLite
-    if not data:
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                cursor = conn.execute("SELECT data_json, updated_at_ms FROM pulse_snapshots WHERE feed_name = ?", (feed_name,))
-                row = cursor.fetchone()
-                if row:
-                    data = json.loads(row[0])
-        except Exception:
-            pass
-
-    return {
+def _publish(feed, data):
+    if isinstance(data, list):
+        stamps = [row.get("timestamp_ms") for row in data if isinstance(row, dict)]
+        if (
+            not data
+            or len(stamps) != len(data)
+            or any(not isinstance(stamp, int) for stamp in stamps)
+        ):
+            raise ValueError("Feed has no valid acquired observations")
+        timestamp = min(stamps)
+    elif isinstance(data, dict) and isinstance(data.get("timestamp_ms"), int):
+        timestamp = data["timestamp_ms"]
+    else:
+        raise ValueError("Feed has no valid acquisition timestamp")
+    if timestamp > int(time.time() * 1000) + 1000:
+        raise ValueError("Feed observation is in the future")
+    snapshot = {
         "status": "ok",
-        "feed": feed_name,
-        "timestamp_ms": now_ms,
-        "ttl_seconds": 10,
-        "data": data
+        "feed": feed,
+        "timestamp_ms": timestamp,
+        "ttl_seconds": TTL_SECONDS,
+        "data": copy.deepcopy(data),
     }
+    _FEED_SNAPSHOTS[feed] = snapshot
+    STATE[feed.replace("-", "_")] = copy.deepcopy(data)
+    _ERRORS.pop(feed, None)
+    if feed in _FEED_EVENTS:
+        _FEED_EVENTS[feed].set()
+
+
+async def run_single_poll_cycle(client):
+    callbacks = (
+        fetch_base_liquidity_state,
+        fetch_polymarket_velocity_state,
+        fetch_threat_intel_state,
+        fetch_arb_routes_state,
+    )
+
+    async def acquire_one(feed, callback):
+        try:
+            result = await asyncio.wait_for(callback(client), FEED_TIMEOUT_SECONDS)
+            _publish(feed, result)
+        except Exception as error:
+            # Preserve previous content and its original timestamp; never turn a
+            # failed refresh into a fresh successful response.
+            _ERRORS[feed] = type(error).__name__
+        finally:
+            if feed in _FEED_EVENTS:
+                _FEED_EVENTS[feed].set()
+
+    await asyncio.gather(
+        *(acquire_one(feed, callback) for feed, callback in zip(FEEDS, callbacks))
+    )
+    STATE["last_poll_ms"] = int(time.time() * 1000)
+    STATE["poll_count"] += 1
+    STATE["status"] = "healthy" if not _ERRORS else "degraded"
+
+
+async def _refresh():
+    async with httpx.AsyncClient(
+        timeout=8,
+        headers={"User-Agent": "Pulse402-ReadOnly-Feeds/2"},
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
+        await run_single_poll_cycle(client)
+
+
+async def _refresh_singleflight(feed_name=None):
+    global _REFRESH_TASK, _FEED_EVENTS
+    if _REFRESH_TASK is None or _REFRESH_TASK.done():
+        _FEED_EVENTS = {feed: asyncio.Event() for feed in FEEDS}
+        events = _FEED_EVENTS
+        _REFRESH_TASK = asyncio.create_task(_refresh())
+
+        # A refresh can fail before any callback starts. Always release waiters
+        # and retrieve task exceptions even if their request was cancelled.
+        def settled(task):
+            for event in events.values():
+                event.set()
+            if not task.cancelled():
+                task.exception()
+
+        _REFRESH_TASK.add_done_callback(settled)
+    task = _REFRESH_TASK
+    try:
+        if feed_name is None:
+            await asyncio.wait_for(asyncio.shield(task), REFRESH_TIMEOUT_SECONDS)
+        else:
+            await asyncio.wait_for(
+                _FEED_EVENTS[feed_name].wait(), REFRESH_TIMEOUT_SECONDS
+            )
+    finally:
+        if task.done() and _REFRESH_TASK is task:
+            _REFRESH_TASK = None
+
+
+def get_feed_state(feed_name):
+    if feed_name not in FEEDS:
+        raise ValueError("Unknown feed")
+    snapshot = _FEED_SNAPSHOTS.get(feed_name)
+    if snapshot is None:
+        return {
+            "status": "unavailable",
+            "feed": feed_name,
+            "timestamp_ms": None,
+            "ttl_seconds": TTL_SECONDS,
+            "data": None,
+            "reason": "No acquired snapshot",
+        }
+    result = copy.deepcopy(snapshot)
+    age = int(time.time() * 1000) - result["timestamp_ms"]
+    result["age_ms"] = max(0, age)
+    if age >= TTL_SECONDS * 1000:
+        result["status"] = "stale"
+        result["reason"] = (
+            "Previous acquisition expired; no fresh timestamp was fabricated"
+        )
+    return result
+
+
+async def acquire_feed_state(feed_name):
+    state = get_feed_state(feed_name)
+    if state["status"] == "ok":
+        return state
+    try:
+        await _refresh_singleflight(feed_name)
+    except Exception:
+        logger.warning("Feed refresh failed")
+    return get_feed_state(feed_name)
+
+
+async def start_poller_loop(poll_interval_seconds=10):
+    while True:
+        started = time.monotonic()
+        try:
+            await _refresh_singleflight()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Background feed refresh failed")
+        await asyncio.sleep(
+            max(0.5, poll_interval_seconds - (time.monotonic() - started))
+        )

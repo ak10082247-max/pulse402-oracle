@@ -30,17 +30,17 @@
   <div class="container">
     <header>
       <div>
-        <h1>⚡ Pulse402 — Data Oracle <span class="badge">LIVE • 15s REFRESH</span></h1>
+        <h1>⚡ Pulse402 — Data Oracle <span class="badge">OBSERVED DATA • 10s TTL</span></h1>
         <p style="color:#9ca3af;font-size:12px;margin-top:4px;">Non-cacheable Base DEX, Polymarket velocity, and cross-DEX arb oracle for autonomous AI agents.</p>
       </div>
       <div>
         <a href="/.well-known/x402.json" class="btn" style="background:#2563eb;color:#fff;">x402 Manifest</a>
-        <a href="/mcp" class="btn">MCP Stream</a>
+        <a href="/mcp" class="btn">MCP Connection</a>
       </div>
     </header>
 
     <div class="grid">
-      <div class="card"><div class="card-title">Settlement Network</div><div class="card-val" style="color:#60a5fa;">Base (8453)</div></div>
+      <div class="card"><div class="card-title">Settlement Network</div><div class="card-val" style="color:#60a5fa;">Base + Solana</div></div>
       <div class="card"><div class="card-title">USDC Price / Call</div><div class="card-val">$0.001 USDC</div></div>
       <div class="card"><div class="card-title">HFT Prepay Pass</div><div class="card-val" style="color:var(--green);">$5 / 6,000 calls</div></div>
       <div class="card"><div class="card-title">Freshness TTL</div><div class="card-val" id="ttlCounter" style="color:var(--amber);">10s TTL</div></div>
@@ -60,7 +60,7 @@
 
       <div class="feed-card">
         <div class="feed-header">
-          <span class="feed-name">2. /v1/pulse/polymarket-velocity (Markets Moving &gt;2% in 5 min)</span>
+          <span class="feed-name">2. /v1/pulse/polymarket-velocity (Historical Movement &amp; Orderbook Depth)</span>
           <div class="btn-group">
             <a href="/v1/pulse/polymarket-velocity" class="btn" target="_blank">x402 Paid Route</a>
             <a href="/v1/preview/polymarket-velocity" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
@@ -71,7 +71,7 @@
 
       <div class="feed-card">
         <div class="feed-header">
-          <span class="feed-name">3. /v1/pulse/threat-intel (Base Honeypot Contracts & Malicious Spenders)</span>
+          <span class="feed-name">3. /v1/pulse/threat-intel (Sampled Base Token Risks &amp; Text Checks)</span>
           <div class="btn-group">
             <a href="/v1/pulse/threat-intel" class="btn" target="_blank">x402 Paid Route</a>
             <a href="/v1/preview/threat-intel" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
@@ -105,7 +105,7 @@
     </div>
 
     <footer>
-      Pulse402 Oracle • Base PayTo: <code>0x73279fa4BadA7CAC888c62CDa4f5c8104765f6f1</code> • Powered by Cloudflare Workers &amp; x402 V2
+      Pulse402 Oracle • Base PayTo: <code>0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6</code> • Solana PayTo: <code>9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh</code> • x402 V2
     </footer>
   </div>
 
@@ -124,15 +124,11 @@
     loadFeed('/v1/preview/threat-intel', 'preThreat');
     loadFeed('/v1/preview/arb-routes', 'preArb');
 
-    let counter = 10;
     setInterval(() => {
-      counter = counter <= 1 ? 10 : counter - 1;
-      document.getElementById('ttlCounter').textContent = counter + 's TTL';
-      if (counter === 10) {
-        loadFeed('/v1/preview/base-liquidity', 'preLiquidity');
-        loadFeed('/v1/preview/arb-routes', 'preArb');
+      for (const [name, id] of [['base-liquidity','preLiquidity'], ['polymarket-velocity','prePolymarket'], ['threat-intel','preThreat'], ['arb-routes','preArb']]) {
+        loadFeed('/v1/preview/' + name, id);
       }
-    }, 1000);
+    }, 10000);
   </script>
 </body>
 </html>
