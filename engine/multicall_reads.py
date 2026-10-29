@@ -16,6 +16,7 @@ CODE_HASH = "0xd5c15df687b16f2ff992fc8d767b4216323184a2bbc6ee2f9c398c318e770891"
 SELECTOR = keccak(text="aggregate3((address,bool,bytes)[])")[:4]
 MAX_CALLS = 40
 MAX_QUOTE_CALLS = 4
+MAX_OUTER_BATCH = 6
 GAS_CEILING = 20_000_000
 
 SPECS = {
@@ -105,3 +106,33 @@ def results(value, rows):
 
 def code_matches(value):
     return isinstance(value, str) and bool(re.fullmatch(r"0x[0-9a-fA-F]{7616}", value)) and "0x" + keccak(bytes.fromhex(value[2:])).hex() == CODE_HASH
+
+
+def is_aggregate(payload):
+    if not isinstance(payload, dict) or payload.get("method") != "eth_call":
+        return False
+    params = payload.get("params")
+    return isinstance(params, list) and len(params) == 2 and isinstance(params[0], dict) and str(params[0].get("to", "")).lower() == ADDRESS_MULTICALL.lower() and str(params[0].get("data", "")).lower().startswith("0x" + SELECTOR.hex())
+
+
+def batch_results(value, count):
+    """Map unordered transport responses before restoring each local outer ID."""
+    if not 1 <= count <= MAX_OUTER_BATCH or not isinstance(value, list) or len(value) != count:
+        raise QuoteError("INVALID_MULTICALL_BATCH", "Outer batch is incomplete or oversized")
+    mapped = {}
+    for row in value:
+        if not valid_response(row) or row["id"] in mapped:
+            raise QuoteError("INVALID_MULTICALL_BATCH", "Outer batch envelope differs from requests")
+        mapped[row["id"]] = row
+    if set(mapped) != set(range(1, count + 1)):
+        raise QuoteError("INVALID_MULTICALL_BATCH", "Outer batch IDs differ from requests")
+    return [{**mapped[index], "id": 1} for index in range(1, count + 1)]
+
+
+def valid_response(row):
+    if not isinstance(row, dict) or row.get("jsonrpc") != "2.0" or type(row.get("id")) is not int or ("result" in row) == ("error" in row):
+        return False
+    if "error" in row:
+        error = row["error"]
+        return isinstance(error, dict) and type(error.get("code")) is int and isinstance(error.get("message"), str) and len(error["message"]) <= 2048
+    return True

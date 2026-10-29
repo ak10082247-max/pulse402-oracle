@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import logging
+import math
 import time
 import httpx
 from .base_dex import fetch_base_liquidity_state, release_quote_cycle
@@ -28,6 +29,10 @@ _REFRESH_TASK = None
 _FEED_EVENTS = {}
 FEED_TIMEOUT_SECONDS = 18
 REFRESH_TIMEOUT_SECONDS = 20
+MAX_POLL_PERIOD_SECONDS = 8.0
+MIN_POLL_DELAY_SECONDS = 0.5
+REFRESH_HEADROOM_SECONDS = 0.5
+_LAST_REFRESH_INFO = None
 
 
 def init_db():
@@ -105,12 +110,78 @@ async def _refresh():
             await release_quote_cycle(client)
 
 
+def _observation_timestamps():
+    return {
+        feed: snapshot["timestamp_ms"]
+        for feed, snapshot in _FEED_SNAPSHOTS.items()
+        if type(snapshot.get("timestamp_ms")) is int and snapshot["timestamp_ms"] > 0
+    }
+
+
+async def _timed_refresh():
+    """Measure the whole shared task, including when a background caller joins it."""
+    global _LAST_REFRESH_INFO
+    before = _observation_timestamps()
+    started = time.monotonic()
+    completed, cancelled = False, False
+    try:
+        await _refresh()
+        completed = True
+    except asyncio.CancelledError:
+        cancelled = True
+        raise
+    finally:
+        # Cancellation cannot replace a full-cycle estimate with a partial one.
+        if not cancelled:
+            after = _observation_timestamps()
+            _LAST_REFRESH_INFO = {
+                "duration_seconds": max(0.0, time.monotonic() - started),
+                "failed": not completed,
+                "acquired_timestamps_ms": {
+                    feed: stamp
+                    for feed, stamp in after.items()
+                    if stamp > before.get(feed, -1)
+                },
+            }
+
+
+def _next_poll_delay(poll_interval_seconds, elapsed_seconds, now_ms, refresh_info):
+    """Start early enough to cover measured acquisition, without renewing any TTL."""
+    period = float(poll_interval_seconds)
+    if not math.isfinite(period) or period <= 0:
+        raise ValueError("Polling period must be finite and positive")
+    period = max(MIN_POLL_DELAY_SECONDS, min(MAX_POLL_PERIOD_SECONDS, period))
+    cadence_delay = max(MIN_POLL_DELAY_SECONDS, period - max(0.0, elapsed_seconds))
+    if not refresh_info or refresh_info.get("failed"):
+        return cadence_delay
+    duration = refresh_info.get("duration_seconds")
+    if (
+        not isinstance(duration, (int, float))
+        or not math.isfinite(duration)
+        or duration < 0
+    ):
+        return cadence_delay
+    # No progress (including a failed provider retaining old content) keeps the
+    # ordinary cadence. Old expired snapshots must not trigger a tight retry loop.
+    expiries = [
+        stamp + TTL_SECONDS * 1000
+        for stamp in refresh_info.get("acquired_timestamps_ms", {}).values()
+        if type(stamp) is int and 0 < stamp <= now_ms + 1000
+    ]
+    if not expiries:
+        return cadence_delay
+    until_start = (min(expiries) - now_ms) / 1000 - duration - REFRESH_HEADROOM_SECONDS
+    # When acquisition itself is too slow this cannot promise continuous
+    # freshness. Retry after a bounded pause and keep the original stale age.
+    return max(MIN_POLL_DELAY_SECONDS, min(cadence_delay, until_start))
+
+
 async def _refresh_singleflight(feed_name=None):
     global _REFRESH_TASK, _FEED_EVENTS
     if _REFRESH_TASK is None or _REFRESH_TASK.done():
         _FEED_EVENTS = {feed: asyncio.Event() for feed in FEEDS}
         events = _FEED_EVENTS
-        _REFRESH_TASK = asyncio.create_task(_refresh())
+        _REFRESH_TASK = asyncio.create_task(_timed_refresh())
 
         # A refresh can fail before any callback starts. Always release waiters
         # and retrieve task exceptions even if their request was cancelled.
@@ -169,7 +240,7 @@ async def acquire_feed_state(feed_name):
     return get_feed_state(feed_name)
 
 
-async def start_poller_loop(poll_interval_seconds=10):
+async def start_poller_loop(poll_interval_seconds=8):
     while True:
         started = time.monotonic()
         try:
@@ -179,5 +250,10 @@ async def start_poller_loop(poll_interval_seconds=10):
         except Exception:
             logger.warning("Background feed refresh failed")
         await asyncio.sleep(
-            max(0.5, poll_interval_seconds - (time.monotonic() - started))
+            _next_poll_delay(
+                poll_interval_seconds,
+                time.monotonic() - started,
+                int(time.time() * 1000),
+                _LAST_REFRESH_INFO,
+            )
         )

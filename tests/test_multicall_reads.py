@@ -142,6 +142,14 @@ class Provider:
         host = request.url.host
         self.calls.append((host, body))
         condition = self.primary if host == "base-rpc.publicnode.com" else self.fallback
+        if isinstance(body, list) and all(multi.is_aggregate(item) for item in body):
+            responses = []
+            for item in body:
+                previous = len(self.calls)
+                response = Provider.respond(self, httpx.Request("POST", request.url, json={**item, "id": 1})).json()
+                del self.calls[previous:]
+                responses.append({**response, "id": item["id"]})
+            return httpx.Response(200, json=list(reversed(responses)))
         if isinstance(body, list):
             value = {"error": "bad batch"} if self.isolated_bad else [{"jsonrpc": "2.0", "id": item["id"], "result": "0xbeef"} for item in reversed(body)]
         elif body["method"] == "eth_chainId": value = "0x1" if condition == "wrong_chain" else "0x2105"
@@ -170,7 +178,7 @@ class Provider:
         return httpx.Response(200, json=value if isinstance(body, list) else {"jsonrpc": "2.0", "id": 1, "result": value})
 
     def requests(self, method, host=None):
-        return [payload for domain, payload in self.calls if isinstance(payload, dict) and payload.get("method") == method and (host is None or domain == host)]
+        return [item for domain, payload in self.calls if host is None or domain == host for item in (payload if isinstance(payload, list) else [payload]) if isinstance(item, dict) and item.get("method") == method and (not isinstance(payload, list) or multi.is_aggregate(item))]
 
 
 async def acquire(provider, items):
@@ -301,7 +309,7 @@ def test_uncertain_sibling_retry_failure_does_not_erase_success_or_reasoned_reve
             values = await asyncio.gather(*(engine.rpc("eth_call", row(index)["params"]) for index in range(3)), return_exceptions=True)
             await engine.close_pending()
             return values, engine
-    monkeypatch.setattr(base_dex, "MAX_QUOTE_AGE_MS", 50)
+    monkeypatch.setattr(base_dex, "MAX_QUOTE_AGE_MS", 500)
     values, engine = asyncio.run(run())
     assert values[0] == "0x" + b"good".hex()
     assert isinstance(values[1], QuoteError) and isinstance(values[2], QuoteError)
@@ -363,3 +371,146 @@ def test_gas_diagnostic_discloses_context_instead_of_claiming_transaction_cost(m
     monkeypatch.setattr(base_dex.BaseQuotes, "quote", quoted)
     value = asyncio.run(base_dex.CycleQuotes(None, {"pools": []}).quote())
     assert "Context-dependent" in value["gas_estimate_semantics"] and "Not transaction gas" in value["gas_estimate_semantics"]
+
+
+def quote_rows(count):
+    return [row(index, UNI_QUOTER, "quoteExactInputSingle((address,address,uint256,uint24,uint160))", ("(address,address,uint256,uint24,uint160)",), ((USDC, WETH, index + 1, 500, 0),)) for index in range(count)]
+
+
+def test_forty_quotes_keep_ten_independent_gas_contexts_in_two_http_requests():
+    provider = Provider()
+    values, engine = asyncio.run(acquire(provider, quote_rows(40)))
+    assert all(isinstance(value, str) for value in values)
+    batches = [payload for _, payload in provider.calls if isinstance(payload, list)]
+    assert [len(batch) for batch in batches] == [6, 4]
+    assert [item["id"] for item in batches[0]] == list(range(1, 7))
+    assert [item["id"] for item in batches[1]] == list(range(1, 5))
+    for request in provider.requests("eth_call"):
+        assert request["params"][1] == BLOCK and int(request["params"][0]["gas"], 16) == multi.GAS_CEILING
+        assert len(decode(("(address,bool,bytes)[]",), bytes.fromhex(request["params"][0]["data"][10:]))[0]) == 4
+    assert engine.read_counts["aggregate_rpc_items"] == 10 and engine.read_counts["aggregated_inner_reads"] == 40
+    assert engine.read_counts["isolated_read_items"] == 0
+    assert len(provider.requests("eth_getCode")) == 1
+
+
+@pytest.mark.parametrize("kind", ["transient", "malformed_result", "outer_revert"])
+def test_partial_outer_batch_failure_recovers_only_failed_group_without_repeating_siblings(kind):
+    class Partial(Provider):
+        def respond(self, request):
+            body = json.loads(request.content)
+            response = super().respond(request)
+            if isinstance(body, list) and all(multi.is_aggregate(item) for item in body):
+                value = response.json()
+                failed = next(item for item in value if item["id"] == 2)
+                if kind == "malformed_result": failed["result"] = "0x00"
+                else:
+                    failed.pop("result")
+                    failed["error"] = {"code": -32005 if kind == "transient" else 3, "message": "rate limit exceeded" if kind == "transient" else "execution reverted"}
+                return httpx.Response(200, json=value)
+            return response
+    provider = Partial(inner_revert=True)
+    values, engine = asyncio.run(acquire(provider, quote_rows(9)))
+    assert isinstance(values[0], str) and isinstance(values[1], QuoteError)
+    assert values[4:8] == ["0xbeef"] * 4 and isinstance(values[8], str)
+    assert len(provider.requests("eth_call")) == 3  # One logical request for each group, never repeated.
+    originals = [payload for _, payload in provider.calls if isinstance(payload, list) and not all(multi.is_aggregate(item) for item in payload)]
+    assert len(originals) == 1 and [item["id"] for item in originals[0]] == [5, 6, 7, 8]
+    assert engine.read_counts["aggregate_fallbacks"] == 1 and engine.read_counts["isolated_read_items"] == 4
+    assert not any(host == "mainnet.base.org" for host, _ in provider.calls)
+
+
+@pytest.mark.parametrize("fallback", ["ok", "wrong_chain", "wrong_block", "bad_code"])
+def test_http_batch_failover_rechecks_chain_hash_and_code_before_sending_any_outer_item(fallback):
+    class RateLimitedBatch(Provider):
+        def respond(self, request):
+            body = json.loads(request.content)
+            if request.url.host == "base-rpc.publicnode.com" and isinstance(body, list) and all(multi.is_aggregate(item) for item in body):
+                self.calls.append((request.url.host, body))
+                return httpx.Response(429, json={"error": "limited"})
+            return super().respond(request)
+    provider = RateLimitedBatch(fallback=fallback)
+    values, _ = asyncio.run(acquire(provider, quote_rows(9)))
+    assert all(isinstance(value, str) for value in values)
+    secondary_batches = [body for host, body in provider.calls if host == "mainnet.base.org" and isinstance(body, list) and all(multi.is_aggregate(item) for item in body)]
+    assert len(secondary_batches) == (1 if fallback == "ok" else 0)
+    if fallback == "ok":
+        before = [body["method"] for host, body in provider.calls[:next(index for index, (host, body) in enumerate(provider.calls) if host == "mainnet.base.org" and isinstance(body, list))] if host == "mainnet.base.org" and isinstance(body, dict)]
+        assert before == ["eth_chainId", "eth_getBlockByNumber", "eth_getCode"]
+
+
+def test_empty_budget_uncertainty_stays_per_inner_read_inside_outer_http_batch():
+    provider = Provider(inner_revert=True, empty_failure=True)
+    values, engine = asyncio.run(acquire(provider, quote_rows(9)))
+    assert values[1] == values[5] == "0xbeef" and all(isinstance(value, str) for value in values)
+    originals = [body for _, body in provider.calls if isinstance(body, list) and not all(multi.is_aggregate(item) for item in body)]
+    assert sorted([item["id"] for body in originals for item in body]) == [2, 6]
+    assert len(provider.requests("eth_call")) == 3
+    assert engine.read_counts["aggregate_budget_unknown_reads"] == 2 and engine.read_counts["isolated_read_items"] == 2
+
+
+@pytest.mark.parametrize("change", ["duplicate", "missing", "substituted", "bool_id", "wrong_version", "both", "neither", "bad_error"])
+def test_outer_batch_strict_mapping_refuses_malformed_envelopes_before_normalizing(change):
+    values = [{"jsonrpc": "2.0", "id": 2, "result": "0x01"}, {"jsonrpc": "2.0", "id": 1, "result": "0x02"}]
+    if change == "duplicate": values[0]["id"] = 1
+    elif change == "missing": values.pop()
+    elif change == "substituted": values[0]["id"] = 3
+    elif change == "bool_id": values[0]["id"] = True
+    elif change == "wrong_version": values[0]["jsonrpc"] = "1.0"
+    elif change == "both": values[0]["error"] = None
+    elif change == "neither": values[0].pop("result")
+    elif change == "bad_error": values[0] = {"jsonrpc": "2.0", "id": 2, "error": {"code": True, "message": "bad"}}
+    with pytest.raises(QuoteError): multi.batch_results(values, 2)
+
+
+def test_outer_batch_reversed_response_ids_are_correlated_then_local_ids_restored():
+    value = multi.batch_results([{"jsonrpc": "2.0", "id": 2, "result": "second"}, {"jsonrpc": "2.0", "id": 1, "result": "first"}], 2)
+    assert value == [{"jsonrpc": "2.0", "id": 1, "result": "first"}, {"jsonrpc": "2.0", "id": 1, "result": "second"}]
+    for count in (0, 7):
+        with pytest.raises(QuoteError): multi.batch_results([], count)
+
+
+@pytest.mark.parametrize("malformed", ["both", "neither", "error_null", "error_bool_code"])
+def test_original_isolated_read_also_requires_exactly_one_valid_result_or_error(malformed):
+    class InvalidOriginal(Provider):
+        def respond(self, request):
+            body = json.loads(request.content)
+            if isinstance(body, list):
+                self.calls.append((request.url.host, body))
+                value = {"jsonrpc": "2.0", "id": body[0]["id"]}
+                if malformed == "both": value.update(result="0xbeef", error=None)
+                elif malformed == "error_null": value["error"] = None
+                elif malformed == "error_bool_code": value["error"] = {"code": True, "message": "bad"}
+                return httpx.Response(200, json=[value])
+            return super().respond(request)
+    values, _ = asyncio.run(acquire(InvalidOriginal(), [row(address=UNKNOWN)]))
+    assert isinstance(values[0], QuoteError)
+
+
+@pytest.mark.parametrize("close_early", [False, True])
+def test_outer_batch_deadline_or_client_release_cancels_transport_and_all_waiters(monkeypatch, close_early):
+    async def run():
+        provider, sent, stopped = Provider(), asyncio.Event(), asyncio.Event()
+        async def respond(request):
+            body = json.loads(request.content)
+            if isinstance(body, list) and all(multi.is_aggregate(item) for item in body):
+                sent.set()
+                try: await asyncio.Event().wait()
+                finally: stopped.set()
+            return provider.respond(request)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            engine = base_dex.CycleQuotes(client, {"pools": []})
+            items = quote_rows(9)
+            engine.block, engine.block_info, engine.observed_at_ms = BLOCK, {"hash": HASH}, int(time.time() * 1000)
+            tasks = [asyncio.create_task(engine.rpc("eth_call", item["params"])) for item in items]
+            try:
+                await asyncio.wait_for(sent.wait(), 1.5)
+                if close_early: await engine.close_pending()
+                values = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 1.5)
+            finally:
+                await engine.close_pending()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            assert stopped.is_set() and not engine._aggregate_queue and not engine._rpc_queue
+            assert engine._aggregate_batch_task is None and engine._rpc_batch_task is None
+            assert all(isinstance(value, BaseException) for value in values)
+    monkeypatch.setattr(base_dex, "MAX_QUOTE_AGE_MS", 500)
+    asyncio.run(run())

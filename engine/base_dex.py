@@ -106,6 +106,8 @@ class CycleQuotes(BaseQuotes):
         self.providers_used = set()
         self._rpc_queue = []
         self._rpc_batch_task = None
+        self._aggregate_queue = []
+        self._aggregate_batch_task = None
         self.canonical_pools = set()
         self._multicall_verified = {}
         self._multicall_verification_lock = asyncio.Lock()
@@ -133,6 +135,8 @@ class CycleQuotes(BaseQuotes):
         pending = set(self.calls.values()) | set(self.discovery.values()) | set(self.route_quotes.values())
         if self._rpc_batch_task is not None:
             pending.add(self._rpc_batch_task)
+        if self._aggregate_batch_task is not None:
+            pending.add(self._aggregate_batch_task)
         pending.discard(asyncio.current_task())
         for task in pending:
             if not task.done():
@@ -141,6 +145,10 @@ class CycleQuotes(BaseQuotes):
             if not future.done():
                 future.cancel()
         self._rpc_queue.clear()
+        for _payload, future, _deadline in self._aggregate_queue:
+            if not future.done():
+                future.cancel()
+        self._aggregate_queue.clear()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
 
@@ -200,7 +208,51 @@ class CycleQuotes(BaseQuotes):
         self.selected_provider = url
         return True
 
-    async def _post_rpc(self, payload):
+    async def _post_rpc(self, payload, *, deadline=None):
+        if not multicall_reads.is_aggregate(payload):
+            return await self._post_rpc_transport(payload)
+        future = asyncio.get_running_loop().create_future()
+        self._aggregate_queue.append((payload, future, deadline))
+        if self._aggregate_batch_task is None:
+            self._aggregate_batch_task = asyncio.create_task(self._flush_aggregates())
+        return await future
+
+    async def _flush_aggregates(self):
+        active = []
+        try:
+            # Let the already-bounded concurrent groups share one HTTP request.
+            await asyncio.sleep(0.001)
+            while self._aggregate_queue:
+                pending, self._aggregate_queue = self._aggregate_queue[:multicall_reads.MAX_OUTER_BATCH], self._aggregate_queue[multicall_reads.MAX_OUTER_BATCH:]
+                active = [(payload, future, deadline) for payload, future, deadline in pending if not future.done()]
+                if not active:
+                    continue
+                requests = [{**payload, "id": index} for index, (payload, _future, _deadline) in enumerate(active, 1)]
+                try:
+                    deadlines = [deadline for _payload, _future, deadline in active if deadline is not None]
+                    async with asyncio.timeout_at(min(deadlines) if deadlines else None):
+                        if len(requests) == 1:
+                            replies = [await self._post_rpc_transport(requests[0])]
+                        else:
+                            replies = multicall_reads.batch_results(await self._post_rpc_transport(requests), len(requests))
+                    for (_payload, future, _deadline), reply in zip(active, replies):
+                        if not future.done():
+                            future.set_result(reply)
+                except Exception as error:
+                    for _payload, future, _deadline in active:
+                        if not future.done():
+                            future.set_exception(error)
+                active = []
+        finally:
+            for _payload, future, _deadline in active:
+                if not future.done():
+                    future.cancel()
+            self._aggregate_batch_task = None
+
+    async def _post_rpc_transport(self, payload):
+        rows = payload if isinstance(payload, list) else [payload]
+        aggregate_batch = isinstance(payload, list) and all(multicall_reads.is_aggregate(row) for row in rows)
+        needs_multicall = any(multicall_reads.is_aggregate(row) for row in rows)
         providers = list(
             dict.fromkeys(
                 [
@@ -216,12 +268,15 @@ class CycleQuotes(BaseQuotes):
             try:
                 if not await self._select(url):
                     continue
-                if isinstance(payload, dict) and payload.get("method") == "eth_call" and payload.get("params", [{}])[0].get("to", "").lower() == multicall_reads.ADDRESS_MULTICALL.lower() and not await self._verify_multicall(url):
+                if needs_multicall and not await self._verify_multicall(url):
                     continue
                 response = await self.client.post(url, json=payload, timeout=7)
                 if response.status_code == 200:
                     value = response.json()
-                    if self._retryable_rpc_error(value):
+                    # A partial batch failure must not repeat successful sibling
+                    # simulations. Per-item errors recover through their own
+                    # bounded original-read fallback, after strict ID mapping.
+                    if self._retryable_rpc_error(value) and not (aggregate_batch and isinstance(value, list)):
                         if len(self.provider_errors) < 30:
                             self.provider_errors.append({"method": "batch" if isinstance(payload, list) else payload["method"], "reason": "RPC_TRANSIENT_ERROR", "block": self.block})
                         continue
@@ -253,7 +308,7 @@ class CycleQuotes(BaseQuotes):
         async def isolated_read(group):
             self.read_counts["isolated_read_items"] += len(group)
             result = await self._post_rpc(group)
-            if not isinstance(result, list) or len(result) != len(group) or any(not isinstance(row, dict) or type(row.get("id")) is not int or row.get("jsonrpc") != "2.0" for row in result) or {row["id"] for row in result} != {row["id"] for row in group}:
+            if not isinstance(result, list) or len(result) != len(group) or any(not multicall_reads.valid_response(row) for row in result) or {row["id"] for row in result} != {row["id"] for row in group}:
                 raise QuoteError("INVALID_RPC_BATCH", "Isolated read IDs do not match requests")
             return result
 
@@ -262,6 +317,7 @@ class CycleQuotes(BaseQuotes):
         timeout = 7.0
         if hasattr(self, "observed_at_ms"):
             timeout = max(0.0, min(timeout, (self.observed_at_ms + MAX_QUOTE_AGE_MS) / 1000 - time.time()))
+        deadline = asyncio.get_running_loop().time() + timeout
 
         async def acquire(group, aggregate):
             combined = None
@@ -273,7 +329,7 @@ class CycleQuotes(BaseQuotes):
                         self.read_counts["aggregated_inner_reads"] += len(group)
                         self.read_counts["aggregate_rpc_items"] += 1
                         try:
-                            combined = multicall_reads.results(await self._post_rpc(multicall_reads.request(group, self.block)), group)
+                            combined = multicall_reads.results(await self._post_rpc(multicall_reads.request(group, self.block), deadline=deadline), group)
                         except (QuoteError, httpx.HTTPError, ValueError, TypeError):
                             # Only whole-request failure retries the original reads.
                             # A valid individual revert was already decoded above.
@@ -307,6 +363,7 @@ class CycleQuotes(BaseQuotes):
         return [row for group in acquired for row in group]
 
     async def _flush_rpc(self):
+        pending = []
         try:
             await asyncio.sleep(0.003)
             while self._rpc_queue:
@@ -346,6 +403,9 @@ class CycleQuotes(BaseQuotes):
                         if not future.done():
                             future.set_exception(error)
         finally:
+            for _method, _params, future in pending:
+                if not future.done():
+                    future.cancel()
             self._rpc_batch_task = None
 
     async def rpc(self, method, params):
