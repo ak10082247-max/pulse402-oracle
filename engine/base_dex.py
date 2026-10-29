@@ -9,7 +9,8 @@ from decimal import Decimal
 
 import httpx
 
-from .base_quotes import BaseQuotes, QuoteError, ADDRESS, UNI_FACTORY
+from .base_quotes import BaseQuotes, QuoteError, ADDRESS, UNI_FACTORY, UNI_QUOTER
+from . import multicall_reads
 
 TOKENS = {
     "WETH": "0x4200000000000000000000000000000000000006",
@@ -105,6 +106,27 @@ class CycleQuotes(BaseQuotes):
         self.providers_used = set()
         self._rpc_queue = []
         self._rpc_batch_task = None
+        self.canonical_pools = set()
+        self._multicall_verified = {}
+        self._multicall_verification_lock = asyncio.Lock()
+        self.read_counts = {"aggregated_inner_reads": 0, "aggregate_rpc_items": 0, "isolated_read_items": 0, "aggregate_fallbacks": 0, "aggregate_budget_unknown_reads": 0}
+
+    async def _verify_multicall(self, url):
+        async with self._multicall_verification_lock:
+            if url in self._multicall_verified:
+                return self._multicall_verified[url]
+            try:
+                response = await self.client.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "eth_getCode", "params": [multicall_reads.ADDRESS_MULTICALL, self.block]}, timeout=5)
+                payload = response.json()
+                valid = response.status_code == 200 and isinstance(payload, dict) and payload.get("jsonrpc") == "2.0" and type(payload.get("id")) is int and payload["id"] == 1 and "error" not in payload and multicall_reads.code_matches(payload.get("result"))
+            except (httpx.HTTPError, ValueError, TypeError):
+                # This engine owns one pinned cycle. Broken code acquisition
+                # must not make every queued group repeat the same timeout.
+                valid = False
+            self._multicall_verified[url] = valid
+            if not valid and len(self.provider_errors) < 30:
+                self.provider_errors.append({"method": "eth_getCode", "reason": "MULTICALL_CODE_NOT_VERIFIED", "block": self.block})
+            return valid
 
     async def close_pending(self):
         """Drain shielded read tasks before their owning HTTP client closes."""
@@ -151,8 +173,9 @@ class CycleQuotes(BaseQuotes):
             response.status_code != 200
             or not isinstance(payload, dict)
             or payload.get("jsonrpc") != "2.0"
-            or payload.get("id") != 1
-            or payload.get("error")
+            or type(payload.get("id")) is not int
+            or payload["id"] != 1
+            or "error" in payload
             or payload.get("result") != "0x2105"
         ):
             return False
@@ -168,9 +191,8 @@ class CycleQuotes(BaseQuotes):
                 },
                 timeout=5,
             )
-            observed = (
-                response.json().get("result") if response.status_code == 200 else None
-            )
+            payload = response.json() if response.status_code == 200 else None
+            observed = payload.get("result") if isinstance(payload, dict) and payload.get("jsonrpc") == "2.0" and type(payload.get("id")) is int and payload["id"] == 1 and "error" not in payload else None
             if not isinstance(observed, dict) or observed.get("hash") != pinned.get(
                 "hash"
             ):
@@ -193,6 +215,8 @@ class CycleQuotes(BaseQuotes):
                 continue
             try:
                 if not await self._select(url):
+                    continue
+                if isinstance(payload, dict) and payload.get("method") == "eth_call" and payload.get("params", [{}])[0].get("to", "").lower() == multicall_reads.ADDRESS_MULTICALL.lower() and not await self._verify_multicall(url):
                     continue
                 response = await self.client.post(url, json=payload, timeout=7)
                 if response.status_code == 200:
@@ -222,6 +246,66 @@ class CycleQuotes(BaseQuotes):
             "No chain- and block-verified provider completed the read",
         )
 
+    async def _read_chunk(self, rows):
+        approved = [row for row in rows if multicall_reads.reviewed(row["params"], self.block, set(TOKENS.values()), self.canonical_pools)]
+        isolated = [row for row in rows if row not in approved]
+
+        async def isolated_read(group):
+            self.read_counts["isolated_read_items"] += len(group)
+            result = await self._post_rpc(group)
+            if not isinstance(result, list) or len(result) != len(group) or any(not isinstance(row, dict) or type(row.get("id")) is not int or row.get("jsonrpc") != "2.0" for row in result) or {row["id"] for row in result} != {row["id"] for row in group}:
+                raise QuoteError("INVALID_RPC_BATCH", "Isolated read IDs do not match requests")
+            return result
+
+        # Aggregate acquisition and its one isolated fallback share a deadline.
+        # A fallback never grants a new freshness window or outlives quote age.
+        timeout = 7.0
+        if hasattr(self, "observed_at_ms"):
+            timeout = max(0.0, min(timeout, (self.observed_at_ms + MAX_QUOTE_AGE_MS) / 1000 - time.time()))
+
+        async def acquire(group, aggregate):
+            combined = None
+            try:
+                if timeout <= 0:
+                    raise QuoteError("STALE_QUOTE", "Original quote acquisition has expired")
+                async with asyncio.timeout(timeout), self.budget:
+                    if aggregate:
+                        self.read_counts["aggregated_inner_reads"] += len(group)
+                        self.read_counts["aggregate_rpc_items"] += 1
+                        try:
+                            combined = multicall_reads.results(await self._post_rpc(multicall_reads.request(group, self.block)), group)
+                        except (QuoteError, httpx.HTTPError, ValueError, TypeError):
+                            # Only whole-request failure retries the original reads.
+                            # A valid individual revert was already decoded above.
+                            self.read_counts["aggregate_fallbacks"] += 1
+                        else:
+                            # Empty failure data cannot distinguish a contract
+                            # failure from EIP-150 subcall gas starvation. Repeat
+                            # only those uncertain reads once in isolation.
+                            unknown = {row["id"] for row in combined if row.get("error", {}).get("code") == -32001}
+                            if unknown:
+                                self.read_counts["aggregate_budget_unknown_reads"] += len(unknown)
+                                retried = await isolated_read([row for row in group if row["id"] in unknown])
+                                replacements = {row["id"]: row for row in retried}
+                                combined = [replacements.get(row["id"], row) for row in combined]
+                            return combined
+                    return await isolated_read(group)
+            except Exception:
+                if combined is not None:
+                    # An uncertain sibling's isolated attempt must not erase
+                    # already-decoded successes or reasoned contract reverts.
+                    return [row if row.get("error", {}).get("code") != -32001 else {"jsonrpc": "2.0", "id": row["id"], "error": {"code": -32000, "message": "Isolated read unavailable after aggregate budget uncertainty"}} for row in combined]
+                return [{"jsonrpc": "2.0", "id": row["id"], "error": {"code": -32000, "message": "Read group unavailable"}} for row in group]
+
+        # QuoterV2 may traverse many initialized ticks (millions of gas per
+        # simulated quote). Keep its chunks smaller without reducing route or
+        # exact-size coverage. Cheap reviewed metadata retains 40-read chunks.
+        quotes = [row for row in approved if row["params"][0]["to"].lower() == UNI_QUOTER.lower()]
+        metadata = [row for row in approved if row not in quotes]
+        groups = [(metadata, True)] + [(quotes[index:index + multicall_reads.MAX_QUOTE_CALLS], True) for index in range(0, len(quotes), multicall_reads.MAX_QUOTE_CALLS)] + [(isolated, False)]
+        acquired = await asyncio.gather(*(acquire(group, aggregate) for group, aggregate in groups if group))
+        return [row for group in acquired for row in group]
+
     async def _flush_rpc(self):
         try:
             await asyncio.sleep(0.003)
@@ -232,7 +316,7 @@ class CycleQuotes(BaseQuotes):
                     for index, (method, params, _future) in enumerate(pending, 1)
                 ]
                 try:
-                    response = await self._post_rpc(payload)
+                    response = await self._read_chunk(payload)
                     if not isinstance(response, list) or len(response) != len(payload):
                         raise QuoteError("INVALID_RPC_BATCH", "Incomplete RPC batch")
                     mapped = {
@@ -277,8 +361,9 @@ class CycleQuotes(BaseQuotes):
         if (
             not isinstance(payload, dict)
             or payload.get("jsonrpc") != "2.0"
-            or payload.get("id") != 1
-            or payload.get("error")
+            or type(payload.get("id")) is not int
+            or payload["id"] != 1
+            or "error" in payload
             or "result" not in payload
         ):
             raise QuoteError("RPC_READ_FAILED", "Invalid pinned Base RPC result")
@@ -290,7 +375,16 @@ class CycleQuotes(BaseQuotes):
             self.calls[key] = asyncio.create_task(
                 super().call(address, signature, types, values, outputs)
             )
-        return await asyncio.shield(self.calls[key])
+        result = await asyncio.shield(self.calls[key])
+        if address.lower() == UNI_FACTORY.lower() and signature == "getPool(address,address,uint24)" and outputs == ("address",) and result and int(result[0], 16):
+            self.canonical_pools.add(result[0].lower())
+        return result
+
+    async def quote(self, *args, **kwargs):
+        result = await super().quote(*args, **kwargs)
+        if result.get("gas_units_quote_estimate") is not None:
+            result["gas_estimate_semantics"] = "Context-dependent read-only simulation; aggregate call warming can change this diagnostic. Not transaction gas or net-profit evidence."
+        return result
 
     async def discover(self, tin, tout):
         key = tuple(sorted((tin, tout)))
