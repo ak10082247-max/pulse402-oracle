@@ -8,6 +8,7 @@ import unicodedata
 from decimal import Decimal
 import httpx
 from .base_dex import TOKENS
+from .provider_reads import read_public_json, provider_error, accept_provider_result
 
 INVISIBLE_CHARS = re.compile(
     r"[\u00ad\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufe00-\ufe0f\ufeff]"
@@ -76,19 +77,18 @@ async def fetch_threat_intel_state(client=None):
         async with httpx.AsyncClient(timeout=8) as owned:
             return await fetch_threat_intel_state(owned)
     addresses = [value for symbol, value in TOKENS.items() if symbol != "USDC"]
-    response = await client.get(
-        "https://api.gopluslabs.io/api/v1/token_security/8453",
-        params={"contract_addresses": ",".join(addresses)},
-        timeout=8,
-    )
-    response.raise_for_status()
-    body = response.json()
-    if body.get("code") != 1 or not isinstance(body.get("result"), dict):
-        raise ValueError("Token risk provider did not return acquired evidence")
-    acquired_at = int(time.time() * 1000)
+    acquired = await read_public_json(client, "goplus", addresses=addresses)
+    body = acquired.body
+    if not isinstance(body, dict):
+        raise provider_error("goplus", "INVALID_SCHEMA", status=200, attempts=acquired.attempts)
+    if type(body.get("code")) is not int or body["code"] != 1:
+        raise provider_error("goplus", "API_REJECTED", status=200, attempts=acquired.attempts, api_code=body.get("code"))
+    if not isinstance(body.get("result"), dict):
+        raise provider_error("goplus", "INVALID_SCHEMA", status=200, attempts=acquired.attempts)
+    acquired_at = acquired.retrieved_at_ms
     rows = []
     for address, data in body["result"].items():
-        if address.lower() not in addresses or not isinstance(data, dict):
+        if not isinstance(address, str) or address.lower() not in addresses or not isinstance(data, dict) or not data:
             continue
         flag = data.get("is_honeypot")
         rows.append(
@@ -119,7 +119,8 @@ async def fetch_threat_intel_state(client=None):
             }
         )
     if not rows:
-        raise ValueError("Provider returned no requested token evidence")
+        raise provider_error("goplus", "NO_EVIDENCE", status=200, attempts=acquired.attempts)
+    accept_provider_result("goplus", acquired_at)
     return {
         "rolling_honeypots": [
             row for row in rows if row["provider_honeypot_flag"] is True

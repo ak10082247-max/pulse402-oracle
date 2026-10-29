@@ -15,11 +15,15 @@ from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 import httpx
 
-from engine.poller import start_poller_loop, get_feed_state, STATE
+from engine.poller import start_poller_loop, get_feed_state, get_feed_diagnostics, STATE
+from engine.provider_reads import provider_diagnostics
 from engine.threat_intel import sanitize_untrusted_text
 from engine import payments
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+# Request INFO lines include complete URLs, which may contain provider credentials.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("pulse402.app")
 
 # Constants & Payment Configuration
@@ -410,7 +414,8 @@ async def health_check():
         "last_refresh_status": STATE.get("status", "unknown"),
         "last_poll_ms": STATE.get("last_poll_ms", 0),
         "total_poll_cycles": STATE.get("poll_count", 0),
-        "feed_status": {name: {"status": feed.get("status"), "observed_at_ms": feed.get("timestamp_ms"), "age_ms": feed.get("age_ms")} for name, feed in feeds.items()},
+        "feed_status": {name: {"status": feed.get("status"), "observed_at_ms": feed.get("timestamp_ms"), "age_ms": feed.get("age_ms"), **get_feed_diagnostics(name)} for name, feed in feeds.items()},
+        "public_provider_status": provider_diagnostics(),
         "active_feeds": [
             "/v1/pulse/base-liquidity",
             "/v1/pulse/polymarket-velocity",

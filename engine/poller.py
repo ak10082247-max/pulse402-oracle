@@ -2,14 +2,17 @@
 
 import asyncio
 import copy
+import json
 import logging
 import math
+import re
 import time
 import httpx
 from .base_dex import fetch_base_liquidity_state, release_quote_cycle
 from .polymarket import fetch_polymarket_velocity_state
 from .threat_intel import fetch_threat_intel_state
 from .arb_router import fetch_arb_routes_state
+from .base_quotes import QuoteError
 
 logger = logging.getLogger("pulse402.poller")
 TTL_SECONDS = 10
@@ -25,6 +28,7 @@ STATE = {
 }
 _FEED_SNAPSHOTS = {}
 _ERRORS = {}
+_ACQUISITION_METRICS = {}
 _REFRESH_TASK = None
 _FEED_EVENTS = {}
 FEED_TIMEOUT_SECONDS = 18
@@ -34,6 +38,37 @@ MIN_POLL_DELAY_SECONDS = 0.5
 REFRESH_HEADROOM_SECONDS = 0.5
 _LAST_REFRESH_INFO = None
 _POLL_CLIENT = None
+
+
+def _safe_error_details(error):
+    """Only bounded codes/statuses; exception text can contain provider secrets."""
+    name = type(error).__name__
+    code = name if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,63}", name) else "Exception"
+    status = None
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        code = f"HTTP_{status}" if type(status) is int and 100 <= status <= 599 else code
+    elif isinstance(error, QuoteError):
+        if isinstance(error.code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", error.code):
+            code = error.code
+        # QuoteError.http_status describes our response, not the provider's.
+        status = getattr(error, "provider_http_status", None)
+    if type(status) is not int or not 100 <= status <= 599:
+        status = None
+    return code, status
+
+
+def get_feed_diagnostics(feed_name):
+    if feed_name not in FEEDS:
+        raise ValueError("Unknown feed")
+    metrics = _ACQUISITION_METRICS.get(feed_name, {})
+    return {
+        "last_acquisition_duration_ms": metrics.get("duration_ms"),
+        "last_acquisition_completed_at_ms": metrics.get("completed_at_ms"),
+        "last_acquisition_error_code": metrics.get("error_code"),
+        "last_acquisition_http_status": metrics.get("http_status"),
+        "last_acquisition_api_code": metrics.get("api_code"),
+    }
 
 
 def init_db():
@@ -79,14 +114,38 @@ async def run_single_poll_cycle(client):
     )
 
     async def acquire_one(feed, callback):
+        started = time.perf_counter()
+        completed, error_code, http_status, api_code = False, None, None, None
+        previous_error = _ERRORS.get(feed)
         try:
             result = await asyncio.wait_for(callback(client), FEED_TIMEOUT_SECONDS)
             _publish(feed, result)
+            completed = True
         except Exception as error:
             # Preserve previous content and its original timestamp; never turn a
             # failed refresh into a fresh successful response.
-            _ERRORS[feed] = type(error).__name__
+            error_code, http_status = _safe_error_details(error)
+            value = getattr(error, "provider_api_code", None) if isinstance(error, QuoteError) else None
+            if type(value) is int and -(2**31) <= value < 2**31:
+                api_code = value
+            _ERRORS[feed] = error_code
+            completed = True
         finally:
+            # A shutdown cancellation is not a completed acquisition and must
+            # retain the last actual measurement rather than a partial duration.
+            if completed:
+                metrics = {
+                    "duration_ms": max(0, round((time.perf_counter() - started) * 1000)),
+                    "completed_at_ms": int(time.time() * 1000),
+                    "error_code": error_code,
+                    "http_status": http_status,
+                    "api_code": api_code,
+                }
+                _ACQUISITION_METRICS[feed] = metrics
+                # Log failures and recoveries at operator level. Repeated
+                # successes remain available in health without noisy INFO logs.
+                level = logging.WARNING if error_code else logging.INFO if previous_error else logging.DEBUG
+                logger.log(level, "feed_acquisition %s", json.dumps({"feed": feed, **metrics}, sort_keys=True))
             if feed in _FEED_EVENTS:
                 _FEED_EVENTS[feed].set()
 

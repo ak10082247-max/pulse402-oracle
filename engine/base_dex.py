@@ -11,6 +11,7 @@ import httpx
 
 from .base_quotes import BaseQuotes, QuoteError, ADDRESS, UNI_FACTORY, UNI_QUOTER
 from . import multicall_reads
+from .provider_reads import read_public_json, provider_error, accept_provider_result, ProviderReadError
 
 TOKENS = {
     "WETH": "0x4200000000000000000000000000000000000006",
@@ -57,18 +58,28 @@ def _number(value):
 async def market_snapshot(client):
     """One discovery request per token per cycle, shared by liquidity and routing."""
 
+    def matches(pool, token):
+        if not isinstance(pool, dict) or pool.get("chainId") != "base" or not ADDRESS.fullmatch(str(pool.get("pairAddress", ""))):
+            return False
+        tokens = [pool.get(key) for key in ("baseToken", "quoteToken")]
+        if not all(isinstance(value, dict) for value in tokens):
+            return False
+        addresses = [str(value.get("address", "")).lower() for value in tokens]
+        return len(set(addresses)) == 2 and all(ADDRESS.fullmatch(address) for address in addresses) and token in addresses
+
     async def fetch_token(symbol, token):
         try:
-            response = await client.get(
-                f"https://api.dexscreener.com/token-pairs/v1/base/{token}", timeout=6
-            )
-            response.raise_for_status()
-            payload = response.json()
+            acquired = await read_public_json(client, "dexscreener", token=token)
+            payload = acquired.body
             if not isinstance(payload, list):
-                raise ValueError("Expected pool list")
-            return symbol, payload, None
-        except (httpx.HTTPError, ValueError, TypeError):
-            return symbol, [], {"symbol": symbol, "error": "DISCOVERY_UNAVAILABLE"}
+                raise provider_error("dexscreener", "INVALID_SCHEMA", status=200, attempts=acquired.attempts)
+            payload = [pool for pool in payload if matches(pool, token)]
+            if not payload:
+                raise provider_error("dexscreener", "NO_EVIDENCE", status=200, attempts=acquired.attempts)
+            accept_provider_result("dexscreener", acquired.retrieved_at_ms)
+            return symbol, payload, None, acquired.retrieved_at_ms
+        except ProviderReadError as error:
+            return symbol, [], {"symbol": symbol, "error": "DISCOVERY_UNAVAILABLE", "code": error.code, "http_status": error.provider_http_status}, None
 
     acquired = await asyncio.gather(
         *(
@@ -77,30 +88,16 @@ async def market_snapshot(client):
             if symbol != "USDC"
         )
     )
-    pools, errors = {}, []
-    for symbol, payload, error in acquired:
+    pools, errors, timestamps = {}, [], []
+    for symbol, payload, error, retrieved_at_ms in acquired:
         if error:
             errors.append(error)
+        if retrieved_at_ms is not None:
+            timestamps.append(retrieved_at_ms)
         for pool in payload:
-            if (
-                not isinstance(pool, dict)
-                or pool.get("chainId") != "base"
-                or not ADDRESS.fullmatch(str(pool.get("pairAddress", "")))
-            ):
-                continue
-            addresses = [
-                str((pool.get(key) or {}).get("address", "")).lower()
-                for key in ("baseToken", "quoteToken")
-            ]
-            if (
-                len(set(addresses)) != 2
-                or not all(ADDRESS.fullmatch(address) for address in addresses)
-                or TOKENS[symbol] not in addresses
-            ):
-                continue
             pools[pool["pairAddress"].lower()] = pool
     return {
-        "timestamp_ms": int(time.time() * 1000),
+        "timestamp_ms": min(timestamps) if timestamps else int(time.time() * 1000),
         "pools": list(pools.values()),
         "errors": errors,
     }
