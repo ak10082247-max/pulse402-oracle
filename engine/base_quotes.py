@@ -38,6 +38,25 @@ class QuoteError(Exception):
         self.code, self.http_status = code, http_status
 
 
+async def _read_together(*reads):
+    """Drain independent reads, retaining their original validation order."""
+    tasks = [asyncio.ensure_future(read) for read in reads]
+    try:
+        return await asyncio.gather(*tasks, return_exceptions=True)
+    except BaseException:
+        # Caller cancellation must not leave HTTP requests using a closed client.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
+def _read_value(result):
+    if isinstance(result, BaseException):
+        raise result
+    return result
+
+
 def solana_address(value):
     if not isinstance(value, str):
         raise QuoteError(
@@ -222,8 +241,11 @@ class BaseQuotes:
         if not isinstance(self.block_info, dict) or not self.block_info.get("hash"):
             raise QuoteError("INVALID_BLOCK", "RPC did not return the quoted block")
         self.decimals = {}
-        for token in (tin, tout):
-            decimals = (await self.call(token, "decimals()", outputs=("uint8",)))[0]
+        results = await _read_together(
+            *(self.call(token, "decimals()", outputs=("uint8",)) for token in (tin, tout))
+        )
+        for token, result in zip((tin, tout), results):
+            decimals = _read_value(result)[0]
             self.decimals[token] = decimals
         return self
 
@@ -307,14 +329,23 @@ class BaseQuotes:
 
     async def quote(self, pool, tin, tout, amount):
         address = pool["pool"]
+        is_v3 = pool["dex"] == "uniswap" and (
+            "v3" in pool["labels"] or "fee" in pool
+        )
+        fee_read = None
         if address not in self.pool_metadata:
-            actual0 = (await self.call(address, "token0()", outputs=("address",)))[
-                0
-            ].lower()
-            actual1 = (await self.call(address, "token1()", outputs=("address",)))[
-                0
-            ].lower()
+            reads = [
+                self.call(address, "token0()", outputs=("address",)),
+                self.call(address, "token1()", outputs=("address",)),
+            ]
+            if is_v3:
+                reads.append(self.call(address, "fee()", outputs=("uint24",)))
+            results = await _read_together(*reads)
+            actual0 = _read_value(results[0])[0].lower()
+            actual1 = _read_value(results[1])[0].lower()
             self.pool_metadata[address] = {"token0": actual0, "token1": actual1}
+            if is_v3:
+                fee_read = results[2]
         meta = self.pool_metadata[address]
         actual0, actual1 = meta["token0"], meta["token1"]
         if {actual0, actual1} != {tin, tout}:
@@ -322,9 +353,13 @@ class BaseQuotes:
                 "POOL_TOKEN_MISMATCH",
                 "On-chain pool tokens do not match requested tokens",
             )
-        if pool["dex"] == "uniswap" and ("v3" in pool["labels"] or "fee" in pool):
+        if is_v3:
             if "fee" not in meta:
-                fee = (await self.call(address, "fee()", outputs=("uint24",)))[0]
+                fee = (
+                    _read_value(fee_read)
+                    if fee_read is not None
+                    else await self.call(address, "fee()", outputs=("uint24",))
+                )[0]
                 factory_pool = (
                     await self.call(
                         UNI_FACTORY,

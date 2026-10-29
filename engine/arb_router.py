@@ -2,7 +2,7 @@
 
 import asyncio
 from decimal import Decimal
-from .base_dex import TOKENS, acquire_quote_cycle, quote_freshness
+from .base_dex import TOKENS, acquire_quote_cycle, quote_freshness, gather_quote_reads
 from .base_quotes import QuoteError
 
 ARB_PAIRS = [
@@ -22,9 +22,13 @@ async def fetch_arb_routes_state(client):
             return None
         raw = int(Decimal(amount) * 10 ** engine.decimals[tin])
         buys = await engine.paths(tin, tout, raw)
+        selected_buys = buys[:3]
+        reverse_paths = await gather_quote_reads(
+            *(engine.paths(tout, tin, int(buy["amount_out_raw"])) for buy in selected_buys)
+        )
         routes = []
-        for buy in buys[:3]:
-            for sell in (await engine.paths(tout, tin, int(buy["amount_out_raw"])))[:3]:
+        for buy, sells in zip(selected_buys, reverse_paths):
+            for sell in sells[:3]:
                 if {leg["pool"] for leg in buy["legs"]} & {
                     leg["pool"] for leg in sell["legs"]
                 }:

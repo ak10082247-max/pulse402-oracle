@@ -33,6 +33,7 @@ MAX_POLL_PERIOD_SECONDS = 8.0
 MIN_POLL_DELAY_SECONDS = 0.5
 REFRESH_HEADROOM_SECONDS = 0.5
 _LAST_REFRESH_INFO = None
+_POLL_CLIENT = None
 
 
 def init_db():
@@ -97,17 +98,32 @@ async def run_single_poll_cycle(client):
     STATE["status"] = "healthy" if not _ERRORS else "degraded"
 
 
-async def _refresh():
-    async with httpx.AsyncClient(
+def _feed_client():
+    return httpx.AsyncClient(
         timeout=8,
         headers={"User-Agent": "Pulse402-ReadOnly-Feeds/2"},
         follow_redirects=False,
         trust_env=False,
-    ) as client:
-        try:
-            await run_single_poll_cycle(client)
-        finally:
-            await release_quote_cycle(client)
+        limits=httpx.Limits(max_connections=64, max_keepalive_connections=64, keepalive_expiry=30),
+    )
+
+
+async def _run_refresh(client):
+    try:
+        await run_single_poll_cycle(client)
+    finally:
+        # Retain connections, never a previous cycle's pinned quotes or tasks.
+        await release_quote_cycle(client)
+
+
+async def _refresh():
+    client = _POLL_CLIENT
+    if client is not None and not client.is_closed:
+        await _run_refresh(client)
+    else:
+        # Actor/standalone callers still own and close their temporary client.
+        async with _feed_client() as client:
+            await _run_refresh(client)
 
 
 def _observation_timestamps():
@@ -241,19 +257,37 @@ async def acquire_feed_state(feed_name):
 
 
 async def start_poller_loop(poll_interval_seconds=8):
-    while True:
-        started = time.monotonic()
+    global _POLL_CLIENT, _REFRESH_TASK
+    if _POLL_CLIENT is not None and not _POLL_CLIENT.is_closed:
+        raise RuntimeError("A background feed client already has an owner")
+    async with _feed_client() as client:
+        _POLL_CLIENT = client
         try:
-            await _refresh_singleflight()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("Background feed refresh failed")
-        await asyncio.sleep(
-            _next_poll_delay(
-                poll_interval_seconds,
-                time.monotonic() - started,
-                int(time.time() * 1000),
-                _LAST_REFRESH_INFO,
-            )
-        )
+            while True:
+                started = time.monotonic()
+                try:
+                    await _refresh_singleflight()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning("Background feed refresh failed")
+                await asyncio.sleep(
+                    _next_poll_delay(
+                        poll_interval_seconds,
+                        time.monotonic() - started,
+                        int(time.time() * 1000),
+                        _LAST_REFRESH_INFO,
+                    )
+                )
+        finally:
+            # Shielded foreground waiters may share this task. Drain the work
+            # before the client owner closes its connection pool on shutdown.
+            pending = _REFRESH_TASK
+            if pending is not None:
+                if not pending.done():
+                    pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+                if _REFRESH_TASK is pending:
+                    _REFRESH_TASK = None
+            if _POLL_CLIENT is client:
+                _POLL_CLIENT = None

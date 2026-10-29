@@ -219,8 +219,11 @@ def build_bazaar_402_challenge(path, request_url=None, amount="1000"):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     poller_task = asyncio.create_task(start_poller_loop(poll_interval_seconds=8.0))
-    yield
-    poller_task.cancel()
+    try:
+        yield
+    finally:
+        poller_task.cancel()
+        await asyncio.gather(poller_task, return_exceptions=True)
 
 app = FastAPI(
     title="Pulse402 — High-Frequency Consumable x402 Data Oracle",

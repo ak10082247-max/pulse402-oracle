@@ -28,6 +28,19 @@ MAX_QUOTE_AGE_MS = 10_000
 MAX_BLOCK_AGE_MS = 20_000
 
 
+async def gather_quote_reads(*reads):
+    """Drain this fan-out's owned wrappers on failure; shared caches own reads."""
+    tasks = [asyncio.create_task(read) for read in reads]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 def _number(value):
     try:
         number = Decimal(str(value))
@@ -541,28 +554,38 @@ class CycleQuotes(BaseQuotes):
         return await asyncio.shield(self.route_quotes[key])
 
     async def _paths(self, tin, tout, raw):
+        weth = TOKENS["WETH"]
+        if weth not in (tin, tout):
+            direct, first_legs = await gather_quote_reads(
+                self.direct_quotes(tin, tout, raw),
+                self.direct_quotes(tin, weth, raw),
+            )
+            first_legs = first_legs[:2]
+        else:
+            direct, first_legs = await self.direct_quotes(tin, tout, raw), []
         paths = [
             {
                 "amount_in_raw": str(raw),
                 "amount_out_raw": quote["amount_out_raw"],
                 "legs": [quote],
             }
-            for quote in await self.direct_quotes(tin, tout, raw)
+            for quote in direct
         ]
-        weth = TOKENS["WETH"]
-        if weth not in (tin, tout):
-            for first in (await self.direct_quotes(tin, weth, raw))[:2]:
-                for second in (
-                    await self.direct_quotes(weth, tout, int(first["amount_out_raw"]))
-                )[:2]:
-                    if first["pool"] != second["pool"]:
-                        paths.append(
-                            {
-                                "amount_in_raw": str(raw),
-                                "amount_out_raw": second["amount_out_raw"],
-                                "legs": [first, second],
-                            }
-                        )
+        second_legs = await gather_quote_reads(
+            *(self.direct_quotes(weth, tout, int(first["amount_out_raw"])) for first in first_legs)
+        )
+        # gather preserves input order even when independent exact-amount
+        # requests finish in another order. Route ties stay deterministic.
+        for first, seconds in zip(first_legs, second_legs):
+            for second in seconds[:2]:
+                if first["pool"] != second["pool"]:
+                    paths.append(
+                        {
+                            "amount_in_raw": str(raw),
+                            "amount_out_raw": second["amount_out_raw"],
+                            "legs": [first, second],
+                        }
+                    )
         return sorted(paths, key=lambda path: int(path["amount_out_raw"]), reverse=True)
 
 
