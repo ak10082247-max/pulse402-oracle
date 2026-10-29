@@ -304,15 +304,23 @@ def get_feed_state(feed_name):
     return result
 
 
-async def acquire_feed_state(feed_name):
+async def acquire_feed_state(feed_name, *, min_remaining_ms=0):
+    if type(min_remaining_ms) is not int or not 0 <= min_remaining_ms < TTL_SECONDS * 1000:
+        raise ValueError("Invalid remaining freshness requirement")
     state = get_feed_state(feed_name)
-    if state["status"] == "ok":
+    if state["status"] == "ok" and state.get("age_ms", TTL_SECONDS * 1000) <= TTL_SECONDS * 1000 - min_remaining_ms:
         return state
     try:
         await _refresh_singleflight(feed_name)
     except Exception:
         logger.warning("Feed refresh failed")
-    return get_feed_state(feed_name)
+    state = get_feed_state(feed_name)
+    if state["status"] == "ok" and state.get("age_ms", TTL_SECONDS * 1000) > TTL_SECONDS * 1000 - min_remaining_ms:
+        # The original observation remains available to health, but is too
+        # close to expiry to start a fresh paid delivery. Never retimestamp it.
+        state["status"] = "unavailable"
+        state["reason"] = "Insufficient original freshness for delivery"
+    return state
 
 
 async def start_poller_loop(poll_interval_seconds=8):

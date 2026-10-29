@@ -720,6 +720,65 @@ def balance_delta(pool, timestamp_ms, balances):
     }
 
 
+def _canonical_path(engine, path, token, raw):
+    """Only actual validated canonical V3 paths may supply independent discovery."""
+    try:
+        legs = path["legs"]
+        if not isinstance(legs, list) or not 1 <= len(legs) <= 2:
+            return False
+        def uint(value):
+            return isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= 78 and int(value) < 2**256
+        if not uint(path.get("amount_in_raw")) or not uint(path.get("amount_out_raw")):
+            return False
+        current, amount = TOKENS["USDC"], raw
+        for leg in legs:
+            pool = leg["pool"].lower()
+            meta = engine.pool_metadata.get(pool, {})
+            tin, tout = leg["token_in"].lower(), leg["token_out"].lower()
+            if (
+                pool not in engine.canonical_pools
+                or leg.get("dex") != "uniswap"
+                or leg.get("method") != "uniswap_v3_quoter_v2"
+                or tin != current
+                or {meta.get("token0"), meta.get("token1")} != {tin, tout}
+                or type(meta.get("fee")) is not int
+                or meta["fee"] not in (100, 500, 3000, 10000)
+                or leg.get("fee_ppm") != meta["fee"]
+                or not uint(leg.get("amount_in_raw"))
+                or not uint(leg.get("amount_out_raw"))
+                or int(leg["amount_in_raw"]) != amount
+                or int(leg["amount_out_raw"]) <= 0
+            ):
+                return False
+            current, amount = tout, int(leg["amount_out_raw"])
+        return (
+            current == token
+            and int(path["amount_in_raw"]) == raw
+            and int(path["amount_out_raw"]) == amount
+        )
+    except (AttributeError, KeyError, ValueError, TypeError):
+        return False
+
+
+def _market_discovery_evidence(snapshot, symbol, acquired):
+    evidence = {"status": "acquired" if acquired else "unavailable", "failure_code": None, "provider_http_status": None}
+    if not acquired:
+        evidence["failure_code"] = "MARKET_NOT_ACQUIRED"
+        for error in snapshot.get("errors", []):
+            if not isinstance(error, dict) or error.get("symbol") != symbol:
+                continue
+            code = error.get("code")
+            if not isinstance(code, str) or not code.startswith("DEXSCREENER_"):
+                continue
+            try:
+                failure = ProviderReadError("dexscreener", code.removeprefix("DEXSCREENER_"), status=error.get("http_status"))
+            except ValueError:
+                continue
+            evidence.update(failure_code=failure.code, provider_http_status=failure.provider_http_status)
+            break
+    return evidence
+
+
 async def fetch_base_liquidity_state(client):
     engine = await acquire_quote_cycle(client)
 
@@ -729,11 +788,11 @@ async def fetch_base_liquidity_state(client):
             for p in engine.snapshot["pools"]
             if str((p.get("baseToken") or {}).get("address", "")).lower() == token
         ]
-        if not markets:
+        if token not in getattr(engine, "decimals", {}):
             return None
         market = max(
             markets, key=lambda p: _number((p.get("liquidity") or {}).get("usd")) or 0
-        )
+        ) if markets else None
         quotes = []
         if token in engine.decimals:
             sizes = ("1", "100", "1000", "10000")
@@ -748,7 +807,11 @@ async def fetch_base_liquidity_state(client):
                 )
             )
             for size, paths in zip(sizes, acquired_paths):
+                if market is None:
+                    paths = [path for path in paths if _canonical_path(engine, path, token, int(size) * 10 ** engine.decimals[TOKENS["USDC"]])]
                 if paths:
+                    if int(paths[0]["amount_out_raw"]) <= 0:
+                        raise QuoteError("QUOTE_ACQUISITION_FAILED", "A positive exact-amount quote was not acquired")
                     quotes.append(
                         {
                             "notional_usdc": size,
@@ -761,6 +824,8 @@ async def fetch_base_liquidity_state(client):
                             "decimals_out": engine.decimals[token],
                         }
                     )
+        if {quote["notional_usdc"] for quote in quotes if quote["notional_usdc"] != "1"} != {"100", "1000", "10000"}:
+            raise QuoteError("QUOTE_ACQUISITION_FAILED", "Every offered exact-amount quote is required for this asset")
         reference = next((q for q in quotes if q["notional_usdc"] == "1"), None)
         for quote in quotes:
             quote["price_impact_vs_one_usdc_bps"] = (
@@ -776,33 +841,33 @@ async def fetch_base_liquidity_state(client):
                 if reference
                 else None
             )
-        timestamp = min(engine.observed_at_ms, engine.snapshot["timestamp_ms"])
-        balances = {}
-        delta = None
-        pool = market["pairAddress"].lower()
-        try:
-            for key in ("baseToken", "quoteToken"):
-                address = market[key]["address"].lower()
-                balances[address] = str(
-                    (
-                        await engine.call(
-                            address, "balanceOf(address)", ("address",), (pool,)
-                        )
-                    )[0]
-                )
-            delta = balance_delta(pool, timestamp, balances)
-        except QuoteError:
-            pass
+        timestamp = engine.observed_at_ms if market is None else min(engine.observed_at_ms, engine.snapshot["timestamp_ms"])
+        if market is None:
+            selected = next(quote for quote in quotes if quote["notional_usdc"] == "100")["route"]["legs"][-1]
+            pool = selected["pool"].lower()
+            metadata = engine.pool_metadata[pool]
+            pair_tokens = [metadata["token0"], metadata["token1"]]
+        else:
+            pool = market["pairAddress"].lower()
+            pair_tokens = [market[key]["address"].lower() for key in ("baseToken", "quoteToken")]
+        if len(set(pair_tokens)) != 2 or token not in pair_tokens:
+            raise QuoteError("POOL_TOKEN_MISMATCH", "Selected pool token identities do not match this asset")
+        acquired_balances = await gather_quote_reads(*(engine.call(address, "balanceOf(address)", ("address",), (pool,)) for address in pair_tokens))
+        if any(not isinstance(value, (tuple, list)) or len(value) != 1 or type(value[0]) is not int or value[0] < 0 for value in acquired_balances):
+            raise QuoteError("POOL_BALANCE_UNAVAILABLE", "Both actual selected-pool token balances are required")
+        balances = {address: str(value[0]) for address, value in zip(pair_tokens, acquired_balances)}
+        delta = balance_delta(pool, timestamp, balances)
         return {
             "symbol": symbol,
             "token_address": token,
-            "primary_dex": market.get("dexId"),
+            "primary_dex": market.get("dexId") if market is not None else None,
+            "selected_dex": market.get("dexId") if market is not None else "uniswap",
             "pair_address": pool,
-            "price_usd": _number(market.get("priceUsd")),
-            "liquidity_usd": _number((market.get("liquidity") or {}).get("usd")),
-            "volume_24h_usd": _number((market.get("volume") or {}).get("h24")),
-            "price_delta_5m_pct": (market.get("priceChange") or {}).get("m5"),
-            "pool_token_balances_raw": balances or None,
+            "price_usd": _number(market.get("priceUsd")) if market is not None else None,
+            "liquidity_usd": _number((market.get("liquidity") or {}).get("usd")) if market is not None else None,
+            "volume_24h_usd": _number((market.get("volume") or {}).get("h24")) if market is not None else None,
+            "price_delta_5m_pct": (market.get("priceChange") or {}).get("m5") if market is not None else None,
+            "pool_token_balances_raw": balances,
             "pool_balance_change": delta,
             "netflow_velocity_60s_usd": None,
             "buy_tax_bps": None,
@@ -813,8 +878,13 @@ async def fetch_base_liquidity_state(client):
             "timestamp_ms": timestamp,
             "ttl_seconds": 10,
             "evidence": {
-                "market_provider": "DexScreener",
-                "market_acquired_at_ms": engine.snapshot["timestamp_ms"],
+                "market_provider": "DexScreener" if market is not None else None,
+                "market_acquired_at_ms": engine.snapshot["timestamp_ms"] if market is not None else None,
+                "market_discovery": _market_discovery_evidence(engine.snapshot, symbol, market is not None),
+                "onchain_core_status": "complete",
+                "pool_tokens": pair_tokens,
+                "pool_selection": "largest reported USD liquidity among acquired provider markets" if market is not None else "asset-containing canonical V3 pool on the best acquired 100-USDC path; not a global primary-market claim",
+                "canonical_factory": UNI_FACTORY if market is None else None,
                 "quote_method": "read_only_eth_call",
                 "block_number": int(engine.block, 16),
                 "block_hash": engine.block_info["hash"],
@@ -833,8 +903,42 @@ async def fetch_base_liquidity_state(client):
     valid = [row for row in rows if isinstance(row, dict)]
     quote_freshness(engine)
     if not any(row["size_quotes_usdc"] for row in valid):
+        # Retain an actual discovery cause only when the entire requested
+        # catalog failed. Partial discovery loss does not prove a quote failure.
+        discovery_errors = engine.snapshot.get("errors", [])
+        requested_symbols = {symbol for symbol in TOKENS if symbol != "USDC"}
+        failed_symbols = {
+            error.get("symbol")
+            for error in discovery_errors
+            if isinstance(error, dict)
+        }
+        if not engine.snapshot["pools"] and requested_symbols <= failed_symbols:
+            for error in discovery_errors:
+                code = error.get("code") if isinstance(error, dict) else None
+                if isinstance(code, str) and code.startswith("DEXSCREENER_"):
+                    try:
+                        failure = ProviderReadError(
+                            "dexscreener", code.removeprefix("DEXSCREENER_"),
+                            status=error.get("http_status"),
+                        )
+                    except ValueError:
+                        continue
+                    # Constructing this error must not change the provider's
+                    # original failure timestamp or count another HTTP request.
+                    raise failure
+        for failure in rows:
+            if isinstance(failure, QuoteError):
+                raise failure
         raise QuoteError(
             "QUOTE_ACQUISITION_FAILED",
             "No exact-amount quote was acquired; market summaries alone do not fulfill this feed",
         )
+    coverage = {
+        "configured_assets": [symbol for symbol in TOKENS if symbol != "USDC"],
+        "acquired_assets": [row["symbol"] for row in valid],
+        "unavailable_assets": [symbol for symbol in TOKENS if symbol != "USDC" and not any(row["symbol"] == symbol for row in valid)],
+    }
+    coverage["complete_catalog"] = not coverage["unavailable_assets"]
+    for row in valid:
+        row["evidence"]["catalog_coverage"] = copy.deepcopy(coverage)
     return valid

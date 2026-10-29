@@ -11,6 +11,8 @@ Read-only Base market quotes, Polymarket books/history and sampled token-risk ev
 
 Quotes are unsigned public contract reads. Total execution gas, transfer taxes, MEV, successful fills and net profitability are not established. Unsupported pools and missing evidence are explicit. Displayed price movement does not identify whales. The text sanitizer detects stated patterns and cannot guarantee complete injection prevention. An empty spender list is not an all-clear.
 
+Base balances and amount-specific quotes can be acquired directly from validated canonical Uniswap V3 pools when market discovery is unavailable. Such records disclose their actual pool-selection scope and discovery error; unavailable provider USD prices, USD liquidity, volume and five-minute changes remain null. The catalog lists acquired and unavailable assets. A requested asset without complete quote/balance evidence is rejected before a new payment settles.
+
 ## Payments
 
 Base and Solana use x402 v2 exact USDC payments. An unpaid request returns HTTP 402 with current server requirements. Use an x402-capable client; this server never needs a customer's private key.
@@ -24,6 +26,8 @@ Base and Solana use x402 v2 exact USDC payments. An unpaid request returns HTTP 
 
 The HTTP, sanitizer, prepay and MCP routes share one verified lifecycle: authenticate buyer, claim operation, verify, acquire a valid bounded result, persist preparation, submit settlement once, then commit the receipt/delivery. Ambiguous settlements are retained for reconciliation and never automatically submitted again. Retained completed purchases can recover after authorization expiry.
 
+Feed acquisition reserves freshness headroom without changing its original timestamp or ten-second TTL. A confirmed payment whose data expires during settlement keeps its paid entitlement: the service acquires a replacement without another settlement. If acquisition is unavailable, it reports a confirmed paid pending delivery, and identical authenticated recovery retries fulfillment only. Ordinary completed historical replays retain their original data; an originally expired delivery retains its archived evidence when repaired.
+
 Set `PULSE_PAYMENTS_DB=/app/state/payments.sqlite3` on a persistent disk. SQLite uses WAL, full synchronization and owner-fenced operation transitions. The approved Render disk mounts `/app/state`. Ephemeral storage is unsuitable for preserving purchased credits or recovery across redeployments.
 
 ## Agent discovery
@@ -32,7 +36,7 @@ Set `PULSE_PAYMENTS_DB=/app/state/payments.sqlite3` on a persistent disk. SQLite
 
 Free `/v1/preview/*` routes expose coverage counts and observation health, not priced market records. `/health` distinguishes process health from feed freshness; `/version` exposes the deployed revision.
 
-The Cloudflare Worker proxies every route once to the canonical backend. It has no separate payment engine, free tool quota, synthetic feed or session-minting authority. Publish the Worker separately with the authenticated official Wrangler CLI. A Render deployment does not update Cloudflare.
+The Cloudflare Worker proxies every route once to the canonical backend. It has no separate payment engine, free tool quota, synthetic feed or session-minting authority. Its GitHub integration deploys Worker source separately from Render; Wrangler is another supported deployment path. Backend-only changes are reached through the existing fixed proxy.
 
 ## Verification
 

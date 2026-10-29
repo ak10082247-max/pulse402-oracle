@@ -339,17 +339,26 @@ def feed_arguments(feed_name, arguments, *, query=False):
     return result
 
 
+def feed_delivery_valid(result):
+    if not isinstance(result, dict) or result.get("status") != "ok" or result.get("ttl_seconds") != 10:
+        return False
+    timestamp = result.get("timestamp_ms")
+    return type(timestamp) is int and -1000 <= int(time.time() * 1000) - timestamp <= 9000
+
+
 async def acquire_feed(feed_name, arguments):
     # acquire_feed_state refreshes on demand with a shared in-flight task and
     # retains original acquisition time. No stale snapshot is charged as fresh.
     from engine.poller import acquire_feed_state
-    state = await acquire_feed_state(feed_name)
+    state = await acquire_feed_state(feed_name, min_remaining_ms=4000)
     if state.get("status") != "ok":
         raise payments.PaymentError("FEED_UNAVAILABLE", 503)
     result = json.loads(json.dumps(state))
     data = result["data"]
     if feed_name == "base-liquidity" and arguments.get("symbol"):
         result["data"] = [row for row in data if row.get("symbol", "").upper() == arguments["symbol"]]
+        if not result["data"]:
+            raise payments.PaymentError("REQUESTED_SYMBOL_UNAVAILABLE", 503)
     elif feed_name == "polymarket-velocity" and "min_velocity_pct" in arguments:
         result["data"] = [row for row in data if isinstance(row.get("velocity_5m_pct"), (int, float)) and abs(row["velocity_5m_pct"]) >= arguments["min_velocity_pct"]]
     elif feed_name == "arb-routes" and "min_spread_bps" in arguments:
@@ -359,19 +368,19 @@ async def acquire_feed(feed_name, arguments):
     return result
 
 
-async def paid_delivery(request, path, arguments, acquire, *, metadata=None, amount="1000", prepay=False):
+async def paid_delivery(request, path, arguments, acquire, *, metadata=None, amount="1000", prepay=False, delivery_valid=None):
     raw = payments.payment_header(request.headers, metadata)
     session = request.headers.get("X-Pulse-Session")
     headers = {"Cache-Control": "no-store, max-age=0", "X-Pulse-Oracle": "Pulse402"}
     if session and raw:
         raise payments.PaymentError("CHOOSE_ONE_PAYMENT_METHOD", 400)
     if session and not prepay:
-        data, remaining, request_id, replayed = await payments.execute_session(session, request.headers.get("Idempotency-Key"), path, arguments, acquire)
+        data, remaining, request_id, replayed = await payments.execute_session(session, request.headers.get("Idempotency-Key"), path, arguments, acquire, delivery_valid=delivery_valid)
         headers.update({"X-Pulse-Calls-Remaining": str(remaining), "Idempotency-Key": request_id, "Idempotency-Replayed": str(replayed).lower()})
         return data, headers, None
     if not raw:
         return None, None, build_bazaar_402_challenge(path, amount=amount)
-    data, receipt, replayed = await payments.execute_purchase(raw, path, arguments, acquire, amount=amount, prepay=prepay)
+    data, receipt, replayed = await payments.execute_purchase(raw, path, arguments, acquire, amount=amount, prepay=prepay, delivery_valid=delivery_valid)
     headers.update({"PAYMENT-RESPONSE": base64.b64encode(json.dumps(receipt).encode()).decode(), "Idempotency-Replayed": str(replayed).lower()})
     return data, headers, None
 
@@ -382,7 +391,7 @@ async def handle_feed_response(request, feed_name, path):
             raise payments.PaymentError("DUPLICATE_QUERY_ARGUMENT", 400)
         name = feed_name.replace("_", "-")
         args = feed_arguments(name, dict(request.query_params), query=True)
-        data, headers, challenge = await paid_delivery(request, path, args, lambda: acquire_feed(name, args))
+        data, headers, challenge = await paid_delivery(request, path, args, lambda: acquire_feed(name, args), delivery_valid=feed_delivery_valid)
         return challenge if challenge is not None else JSONResponse(content=data, headers=headers)
     except payments.PaymentError as error:
         return payment_failure(error)
@@ -762,7 +771,7 @@ async def mcp_rpc(request: Request):
                 return JSONResponse({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Unknown tool"}}, status_code=404)
             args = feed_arguments(FEED_TOOL_MAP[name], params.get("arguments", {}))
             bound = {"tool": name, "arguments": args}
-            data, headers, challenge = await paid_delivery(request, "/mcp", bound, lambda: acquire_feed(FEED_TOOL_MAP[name], args), metadata=params.get("_meta"))
+            data, headers, challenge = await paid_delivery(request, "/mcp", bound, lambda: acquire_feed(FEED_TOOL_MAP[name], args), metadata=params.get("_meta"), delivery_valid=feed_delivery_valid)
             if challenge is not None:
                 return JSONResponse({"jsonrpc": "2.0", "id": req_id, "result": {"isError": True, "content": [{"type": "text", "text": challenge.body.decode()}], "structuredContent": json.loads(challenge.body)}}, status_code=402, headers=dict(challenge.headers))
             result = {"content": [{"type": "text", "text": json.dumps(data)}], "structuredContent": data, "isError": False}

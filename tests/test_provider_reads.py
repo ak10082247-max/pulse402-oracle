@@ -15,6 +15,7 @@ TOKEN = base_dex.TOKENS["WETH"]
 @pytest.fixture(autouse=True)
 def clean_diagnostics(monkeypatch):
     monkeypatch.setattr(reads, "_DIAGNOSTICS", {})
+    monkeypatch.setattr(reads, "_COOLDOWNS", {})
     monkeypatch.setattr(reads, "RETRY_DELAY_SECONDS", 0)
 
 
@@ -89,7 +90,11 @@ def test_retry_after_that_exceeds_original_budget_is_honored_without_early_retry
 
 def test_short_retry_after_is_used_inside_existing_budget(monkeypatch):
     sleeps, calls = [], []
-    async def sleep(delay): sleeps.append(delay)
+    clock = [100.0]
+    monkeypatch.setattr(reads, "_cooldown_now", lambda: clock[0])
+    async def sleep(delay):
+        sleeps.append(delay)
+        clock[0] += delay
     monkeypatch.setattr(reads.asyncio, "sleep", sleep)
     def respond(request):
         calls.append(request)

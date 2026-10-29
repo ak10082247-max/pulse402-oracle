@@ -68,7 +68,7 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
         self.env = patch.dict(os.environ, {"PULSE_PAYMENTS_DB": str(Path(self.tmp.name) / "payments.sqlite3"), "PAYOUT_WALLET_ADDRESS": "0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6", "SOLANA_MERCHANT_ADDRESS": "9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh"})
         self.env.start()
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=web.app), base_url="https://pulse402-oracle.onrender.com")
-        self.provider = patch.object(web, "acquire_feed", AsyncMock(return_value={"status": "ok", "data": [PRIVATE_RECORD]}))
+        self.provider = patch.object(web, "acquire_feed", AsyncMock(return_value={"status": "ok", "timestamp_ms": int(time.time() * 1000), "ttl_seconds": 10, "data": [PRIVATE_RECORD]}))
         self.acquire = self.provider.start()
         # HTTP ASGI calls need post(), so isolate facilitator instead of replacing
         # shared HTTP methods. Every test controls this mock; no public endpoint runs.
@@ -489,6 +489,8 @@ class FeedFilterTests(unittest.IsolatedAsyncioTestCase):
     async def test_actual_acquire_wrapper_serializes_and_filters_without_mutating_source(self):
         from engine import poller
         snapshots = {"base-liquidity": {"status": "ok", "data": [{"symbol": "WETH"}, {"symbol": "AERO"}]}, "polymarket-velocity": {"status": "ok", "data": [{"velocity_5m_pct": -4}, {"velocity_5m_pct": 1}, {"velocity_5m_pct": None}]}, "arb-routes": {"status": "ok", "data": [{"spread_bps": 20}, {"spread_bps": 3}, {"spread_bps": None}]}}
+        for snapshot in snapshots.values():
+            snapshot.update(timestamp_ms=int(time.time() * 1000), ttl_seconds=10)
         for feed, arguments, field, expected in (("base-liquidity", {"symbol": "WETH"}, "symbol", "WETH"), ("polymarket-velocity", {"min_velocity_pct": 2}, "velocity_5m_pct", -4), ("arb-routes", {"min_spread_bps": 10}, "spread_bps", 20)):
             with patch.object(poller, "acquire_feed_state", AsyncMock(return_value=snapshots[feed]), create=True):
                 result = await web.acquire_feed(feed, arguments)

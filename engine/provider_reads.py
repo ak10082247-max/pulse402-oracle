@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 import math
 import re
+import sys
 import time
 
 import httpx
@@ -19,6 +20,7 @@ _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 _PREFIX = {"dexscreener": "DEXSCREENER", "goplus": "GOPLUS"}
 _REASONS = {"TIMEOUT", "NETWORK", "HTTP_TRANSPORT", "INVALID_JSON", "INVALID_SCHEMA", "NO_EVIDENCE", "API_REJECTED", "RETRY_BUDGET_EXHAUSTED", "RESPONSE_TOO_LARGE"}
 _DIAGNOSTICS = {}
+_COOLDOWNS = {}
 _METRIC_KEYS = ("request_count", "retry_count", "last_failure_code", "last_failure_http_status", "last_failure_api_code", "last_failure_at_ms", "last_success_at_ms")
 
 
@@ -69,19 +71,70 @@ def _request(provider, token, addresses):
     raise ValueError("Only fixed public Base evidence reads are supported")
 
 
-def _retry_delay(response):
+def _retry_after(response):
     value = response.headers.get("Retry-After") if response is not None else None
-    if isinstance(value, str) and len(value) <= 80:
+    if isinstance(value, str):
+        value = value.strip()
+        # Decimal delay-seconds must not become an early retry merely because
+        # the number is long. Fractional seconds retain the existing extension.
+        if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value):
+            return float(value)
+        if len(value) > 80:
+            return None
         try:
-            delay = float(value)
-        except ValueError:
-            try:
-                delay = parsedate_to_datetime(value).timestamp() - time.time()
-            except (ValueError, TypeError, OverflowError):
-                delay = RETRY_DELAY_SECONDS
+            date = parsedate_to_datetime(value)
+            # An unspecified timezone is not a valid absolute HTTP retry time.
+            if date.tzinfo is None:
+                return None
+            delay = date.timestamp() - time.time()
+        except (ValueError, TypeError, OverflowError, OSError):
+            return None
         if math.isfinite(delay):
             return max(0.0, delay)
+    return None
+
+
+def _retry_delay(response):
+    delay = _retry_after(response)
+    if delay is not None:
+        return delay
     return RETRY_DELAY_SECONDS
+
+
+def _cooldown_now():
+    return time.monotonic()
+
+
+def _check_cooldown(provider):
+    cooldown = _COOLDOWNS.get(provider)
+    if cooldown is None:
+        return
+    if not cooldown.get("unrepresentable_delay") and cooldown["until"] <= _cooldown_now():
+        _COOLDOWNS.pop(provider, None)
+        return
+    # This is the retained cause of a provider-requested pause, not a new
+    # provider failure. Do not renew its diagnostic timestamp or HTTP counters.
+    raise ProviderReadError(provider, cooldown["reason"], status=cooldown["status"], attempts=0)
+
+
+def _respect_retry_after(provider, response, error):
+    delay = _retry_after(response)
+    if response is None or response.status_code not in RETRY_HTTP_STATUSES or delay is None or delay <= 0:
+        return
+    until = _cooldown_now() + delay
+    unrepresentable = not math.isfinite(until)
+    if unrepresentable:
+        # A valid decimal longer than float capacity is still an upstream pause,
+        # not permission to retry early. Keep bounded state and fail closed.
+        until = sys.float_info.max
+    previous = _COOLDOWNS.get(provider)
+    if previous is None or (not previous.get("unrepresentable_delay") and (unrepresentable or until > previous["until"])):
+        # There are only two fixed public endpoints in this helper. Long valid
+        # pauses are retained, never slept past the original per-read budget or
+        # shortened to issue a request earlier than the provider permits.
+        _COOLDOWNS[provider] = {"until": until, "reason": error.code.removeprefix(_PREFIX[provider] + "_"), "status": error.provider_http_status}
+        if unrepresentable:
+            _COOLDOWNS[provider]["unrepresentable_delay"] = True
 
 
 async def read_public_json(client, provider, *, token=None, addresses=None):
@@ -89,6 +142,7 @@ async def read_public_json(client, provider, *, token=None, addresses=None):
     loop = asyncio.get_running_loop()
     deadline = loop.time() + READ_BUDGET_SECONDS
     for attempt in (1, 2):
+        _check_cooldown(provider)
         remaining = deadline - loop.time()
         if remaining <= 0:
             raise provider_error(provider, "RETRY_BUDGET_EXHAUSTED", attempts=attempt - 1)
@@ -123,6 +177,7 @@ async def read_public_json(client, provider, *, token=None, addresses=None):
             reason, retryable = "HTTP_TRANSPORT", False
         status = response.status_code if response is not None else None
         error = provider_error(provider, reason, status=status, attempts=attempt)
+        _respect_retry_after(provider, response, error)
         if not retryable or attempt == 2:
             raise error
         delay = _retry_delay(response)

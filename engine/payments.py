@@ -3,6 +3,7 @@
 This module has no buyer keys and never submits a second settlement attempt.
 PULSE_PAYMENTS_DB must reside on durable storage across deployments.
 """
+import asyncio
 import base64
 import hashlib
 import json
@@ -28,6 +29,8 @@ FACILITATOR = "https://facilitator.payai.network"
 PUBLIC_URL = os.getenv("PUBLIC_URL", "https://pulse402-oracle.onrender.com").rstrip("/")
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+FULFILLMENT_LEASE_SECONDS = 120
+FULFILLMENT_TIMEOUT_SECONDS = 20
 
 
 class PaymentError(Exception):
@@ -164,6 +167,7 @@ def database():
       CREATE TABLE IF NOT EXISTS purchases(id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, state TEXT NOT NULL, owner TEXT, updated REAL NOT NULL, result TEXT, receipt TEXT);
       CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, expires REAL NOT NULL, remaining INTEGER NOT NULL CHECK(remaining>=0), purchase_id TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS credit_deliveries(session_hash TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(session_hash,request_id));
+      CREATE TABLE IF NOT EXISTS purchase_delivery_history(purchase_id TEXT NOT NULL, reason TEXT NOT NULL, archived_at REAL NOT NULL, state TEXT NOT NULL, updated REAL NOT NULL, result TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(purchase_id,reason));
     """)
     try:
         yield db
@@ -214,23 +218,164 @@ def _new_window(payment, network):
             raise PaymentError("INVALID_PAYMENT_WINDOW", 402)
 
 
-async def execute_purchase(raw_header, path, arguments, acquire, *, amount="1000", prepay=False):
+def _delivery_valid(result, delivery_valid):
+    if delivery_valid is None:
+        return True
+    try:
+        return delivery_valid(result) is True
+    except Exception:
+        return False
+
+
+def _encoded_result(result):
+    try:
+        encoded = canonical(result)
+    except Exception:
+        raise PaymentError("FULFILLMENT_UNAVAILABLE", 503)
+    if len(encoded.encode()) > 2_000_000:
+        raise PaymentError("FULFILLMENT_TOO_LARGE", 503)
+    return encoded
+
+
+def _expired_at_original_delivery(previous, result):
+    # Only a proven expiry at the original delivery can reopen a completed
+    # entitlement. Ordinary historical replays remain the exact original data.
+    return (isinstance(result, dict) and type(result.get("timestamp_ms")) is int
+            and result["timestamp_ms"] > 0 and result.get("ttl_seconds") == 10
+            and previous["updated"] * 1000 >= result["timestamp_ms"] + 10_000)
+
+
+def _archive_delivery(db, previous, reason):
+    db.execute("INSERT OR IGNORE INTO purchase_delivery_history VALUES(?,?,?,?,?,?,?)",
+               (previous["id"], reason, time.time(), previous["state"], previous["updated"], previous["result"], previous["receipt"]))
+
+
+def _claim_paid_delivery(db, previous, owner, now, delivery_valid):
+    try:
+        result, receipt = json.loads(previous["result"]), json.loads(previous["receipt"])
+    except (ValueError, TypeError):
+        raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 409, charged="unknown")
+    if previous["state"] == "delivered":
+        if delivery_valid is None or not _expired_at_original_delivery(previous, result):
+            return result, receipt, False
+        _archive_delivery(db, previous, "EXPIRED_AT_ORIGINAL_DELIVERY")
+    elif previous["state"] == "paid_pending_fulfillment":
+        if previous["owner"] and previous["updated"] > now - FULFILLMENT_LEASE_SECONDS:
+            raise PaymentError("PAID_FULFILLMENT_IN_PROGRESS", 409, charged=True)
+    else:
+        raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 409, charged="unknown")
+    changed = db.execute("UPDATE purchases SET state='paid_pending_fulfillment',owner=?,updated=? WHERE id=? AND state=? AND updated=?",
+                         (owner, now, previous["id"], previous["state"], previous["updated"])).rowcount
+    if changed != 1:
+        raise PaymentError("PAID_FULFILLMENT_IN_PROGRESS", 409, charged=True)
+    return result, receipt, True
+
+
+async def _finish_paid_delivery(identity, owner, result, receipt, acquire, delivery_valid, *, prepay=False, replayed=False):
+    try:
+        if not _delivery_valid(result, delivery_valid):
+            async with asyncio.timeout(FULFILLMENT_TIMEOUT_SECONDS):
+                result = await acquire()
+        encoded = _encoded_result(result)
+        with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            # Check after obtaining the write lock: a busy database cannot turn
+            # a previously fresh snapshot into a newly charged stale delivery.
+            if not _delivery_valid(result, delivery_valid):
+                raise PaymentError("PAID_FULFILLMENT_PENDING", 503, charged=True)
+            current = db.execute("SELECT * FROM purchases WHERE id=?", (identity,)).fetchone()
+            if not current or current["state"] != "paid_pending_fulfillment" or current["owner"] != owner:
+                raise PaymentError("PAID_FULFILLMENT_SUPERSEDED", 409, charged=True)
+            if current["result"] != encoded and delivery_valid is not None:
+                _archive_delivery(db, current, "REPLACED_AFTER_CONFIRMED_SETTLEMENT")
+            if prepay:
+                db.execute("INSERT INTO sessions(token_hash,expires,remaining,purchase_id) VALUES(?,?,6000,?)", (hashlib.sha256(result["session_token"].encode()).hexdigest(), result["expires_at_unix"], identity))
+            changed = db.execute("UPDATE purchases SET state='delivered',result=?,receipt=?,updated=? WHERE id=? AND owner=? AND state='paid_pending_fulfillment'", (encoded, canonical(receipt), time.time(), identity, owner)).rowcount
+            if changed != 1:
+                raise PaymentError("PAID_FULFILLMENT_SUPERSEDED", 409, charged=True)
+            db.commit()
+        return result, receipt, replayed
+    except BaseException as error:
+        try:
+            with database() as db:
+                db.execute("UPDATE purchases SET owner=NULL,updated=? WHERE id=? AND owner=? AND state='paid_pending_fulfillment'", (time.time(), identity, owner))
+        except Exception:
+            raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 503, charged="unknown")
+        if isinstance(error, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+            raise
+        if isinstance(error, sqlite3.Error):
+            raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 503, charged="unknown")
+        if isinstance(error, PaymentError) and error.charged is True:
+            raise
+        raise PaymentError("PAID_FULFILLMENT_PENDING", 503, charged=True)
+
+
+async def repair_confirmed_delivery(identity, path, arguments, acquire, *, delivery_valid):
+    """Operator-only fulfillment recovery; no authorization or facilitator call.
+
+    This helper has no HTTP route. The stored paid identity, fingerprint and
+    confirmed receipt must match; it cannot mint a new paid entitlement.
+    """
+    if not isinstance(identity, str) or not re.fullmatch(r"[0-9a-f]{64}", identity) or not callable(delivery_valid):
+        raise PaymentError("INVALID_RECOVERY_REQUEST", 400)
+    owner, now = secrets.token_hex(16), time.time()
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        previous = db.execute("SELECT * FROM purchases WHERE id=?", (identity,)).fetchone()
+        if not previous or previous["fingerprint"] != digest({"path": path, "arguments": arguments}):
+            raise PaymentError("PAYMENT_REQUEST_CONFLICT", 409)
+        if previous["state"] not in ("delivered", "paid_pending_fulfillment"):
+            raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 409, charged="unknown")
+        try:
+            stored = json.loads(previous["receipt"])
+            quote = next(item for item in requirements("1000") if item["network"] == stored.get("network"))
+            payer = stored["payer"]
+            if quote["network"] == BASE:
+                if not isinstance(payer, str) or not ADDRESS.fullmatch(payer):
+                    raise ValueError()
+            elif not isinstance(payer, str) or len(b58decode(payer)) != 32:
+                raise ValueError()
+            if stored != receipt_for(stored, quote, payer, path):
+                raise ValueError()
+        except Exception:
+            raise PaymentError("INVALID_RECOVERY_RECEIPT", 409, charged="unknown")
+        result, receipt, claimed = _claim_paid_delivery(db, previous, owner, now, delivery_valid)
+        db.commit()
+    if not claimed:
+        return result, receipt, True
+    return await _finish_paid_delivery(identity, owner, result, receipt, acquire, delivery_valid, replayed=True)
+
+
+async def execute_purchase(raw_header, path, arguments, acquire, *, amount="1000", prepay=False, delivery_valid=None):
     payment, quote, identity, payer = owned_payment(raw_header, path, amount)
     fingerprint, owner, now = digest({"path": path, "arguments": arguments}), secrets.token_hex(16), time.time()
+    recovery = None
     with database() as db:
         db.execute("BEGIN IMMEDIATE")
         previous = db.execute("SELECT * FROM purchases WHERE id=?", (identity,)).fetchone()
         if previous:
             if previous["fingerprint"] != fingerprint:
                 raise PaymentError("PAYMENT_REQUEST_CONFLICT", 409)
-            if previous["state"] == "delivered":
-                return json.loads(previous["result"]), json.loads(previous["receipt"]), True
-            if previous["state"] != "preparing" or previous["updated"] > now - 120:
+            if previous["state"] in ("delivered", "paid_pending_fulfillment"):
+                try:
+                    stored = json.loads(previous["receipt"])
+                    if stored != receipt_for(stored, quote, payer, path):
+                        raise ValueError()
+                except Exception:
+                    raise PaymentError("INVALID_RECOVERY_RECEIPT", 409, charged="unknown")
+                result, receipt, claimed = _claim_paid_delivery(db, previous, owner, now, delivery_valid)
+                if not claimed:
+                    return result, receipt, True
+                recovery = result, receipt
+            elif previous["state"] != "preparing" or previous["updated"] > now - 120:
                 raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 409, charged="unknown" if previous["state"] != "preparing" else False)
-            db.execute("UPDATE purchases SET owner=?,updated=? WHERE id=? AND state='preparing'", (owner, now, identity))
+            else:
+                db.execute("UPDATE purchases SET owner=?,updated=? WHERE id=? AND state='preparing'", (owner, now, identity))
         else:
             db.execute("INSERT INTO purchases(id,fingerprint,state,owner,updated) VALUES(?,?,'preparing',?,?)", (identity, fingerprint, owner, now))
         db.commit()
+    if recovery is not None:
+        return await _finish_paid_delivery(identity, owner, *recovery, acquire, delivery_valid, prepay=prepay, replayed=True)
     envelope = {"x402Version": 2, "paymentPayload": payment, "paymentRequirements": quote}
     try:
         _new_window(payment, quote["network"])
@@ -239,18 +384,20 @@ async def execute_purchase(raw_header, path, arguments, acquire, *, amount="1000
             raise PaymentError("PAYMENT_NOT_VERIFIED")
         try:
             result = await acquire()
-            encoded = canonical(result)
+            encoded = _encoded_result(result)
         except PaymentError:
             raise
         except Exception:
             raise PaymentError("FULFILLMENT_UNAVAILABLE", 503)
-        if len(encoded.encode()) > 2_000_000:
-            raise PaymentError("FULFILLMENT_TOO_LARGE", 503)
         _new_window(payment, quote["network"])
         with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not _delivery_valid(result, delivery_valid):
+                raise PaymentError("FULFILLMENT_EXPIRED_BEFORE_SETTLEMENT", 503)
             changed = db.execute("UPDATE purchases SET state='settling',result=?,updated=? WHERE id=? AND owner=? AND state='preparing'", (encoded, time.time(), identity, owner)).rowcount
             if changed != 1:
                 raise PaymentError("PREPARATION_SUPERSEDED", 409)
+            db.commit()
     except BaseException:
         with database() as db:
             db.execute("DELETE FROM purchases WHERE id=? AND owner=? AND state='preparing'", (identity, owner))
@@ -266,18 +413,17 @@ async def execute_purchase(raw_header, path, arguments, acquire, *, amount="1000
         candidate = {key: value for key, value in (candidate or {}).items()
                      if key in ("success", "transaction", "payer", "network", "amount", "errorReason", "errorMessage")
                      and isinstance(value, (str, bool, int)) and len(str(value)) <= 512} if isinstance(candidate, dict) else {}
-        with database() as db:
-            db.execute("UPDATE purchases SET state='unknown',receipt=?,updated=? WHERE id=? AND owner=? AND state='settling'", (canonical(candidate), time.time(), identity, owner))
+        try:
+            with database() as db:
+                db.execute("UPDATE purchases SET state='unknown',receipt=?,updated=? WHERE id=? AND owner=? AND state='settling'", (canonical(candidate), time.time(), identity, owner))
+        except Exception:
+            raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 503, charged="unknown")
         raise PaymentError("SETTLEMENT_UNKNOWN", 503, charged="unknown")
     try:
         with database() as db:
-            db.execute("BEGIN IMMEDIATE")
-            if prepay:
-                db.execute("INSERT INTO sessions(token_hash,expires,remaining,purchase_id) VALUES(?,?,6000,?)", (hashlib.sha256(result["session_token"].encode()).hexdigest(), result["expires_at_unix"], identity))
-            changed = db.execute("UPDATE purchases SET state='delivered',receipt=?,updated=? WHERE id=? AND owner=? AND state='settling'", (canonical(receipt), time.time(), identity, owner)).rowcount
+            changed = db.execute("UPDATE purchases SET state='paid_pending_fulfillment',receipt=?,updated=? WHERE id=? AND owner=? AND state='settling'", (canonical(receipt), time.time(), identity, owner)).rowcount
             if changed != 1:
                 raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 503, charged="unknown")
-            db.commit()
     except Exception:
         # The durable settling row retains the prepared result. A confirmed
         # transfer followed by a storage failure must never look safely unpaid.
@@ -285,10 +431,10 @@ async def execute_purchase(raw_header, path, arguments, acquire, *, amount="1000
     # Log only confirmed settlement references, never authorizations/session tokens.
     import logging
     logging.getLogger("pulse402.payments").info("settlement_confirmed operation=%s resource=%s network=%s amount=%s transaction=%s", identity, path, quote["network"], amount, receipt["transaction"])
-    return result, receipt, False
+    return await _finish_paid_delivery(identity, owner, result, receipt, acquire, delivery_valid, prepay=prepay)
 
 
-async def execute_session(token, request_id, path, arguments, acquire):
+async def execute_session(token, request_id, path, arguments, acquire, *, delivery_valid=None):
     if not isinstance(token, str) or not re.fullmatch(r"pulse_sess_[A-Za-z0-9_-]{43}", token):
         raise PaymentError("INVALID_SESSION")
     if request_id is None:
@@ -325,6 +471,8 @@ async def execute_session(token, request_id, path, arguments, acquire):
                 raise PaymentError("SESSION_REQUEST_CONFLICT", 409)
             session = db.execute("SELECT remaining FROM sessions WHERE token_hash=?", (token_hash,)).fetchone()
             return json.loads(previous["result"]), session["remaining"], request_id, True
+        if not _delivery_valid(result, delivery_valid):
+            raise PaymentError("FULFILLMENT_EXPIRED_BEFORE_CREDIT", 503)
         changed = db.execute("UPDATE sessions SET remaining=remaining-1 WHERE token_hash=? AND remaining>0 AND expires>?", (token_hash, time.time())).rowcount
         if changed != 1:
             raise PaymentError("SESSION_EXHAUSTED_OR_EXPIRED")
