@@ -442,6 +442,11 @@ async def health_check():
         "timestamp_ms": int(time.time() * 1000)
     }
 
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    return PlainTextResponse("User-agent: *\nAllow: /\n", media_type="text/plain; charset=utf-8")
+
+@app.get("/.well-known/x402")
 @app.get("/.well-known/x402.json")
 async def x402_manifest(request: Request):
     return {

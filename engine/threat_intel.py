@@ -8,7 +8,9 @@ import unicodedata
 from decimal import Decimal
 import httpx
 from .base_dex import TOKENS
-from .provider_reads import read_public_json, provider_error, accept_provider_result
+from .provider_reads import read_public_json, provider_error, accept_provider_result, set_provider_cooldown
+
+GOPLUS_RATE_LIMIT_COOLDOWN_SECONDS = 15.0
 
 INVISIBLE_CHARS = re.compile(
     r"[\u00ad\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufe00-\ufe0f\ufeff]"
@@ -82,7 +84,10 @@ async def fetch_threat_intel_state(client=None):
     if not isinstance(body, dict):
         raise provider_error("goplus", "INVALID_SCHEMA", status=200, attempts=acquired.attempts)
     if type(body.get("code")) is not int or body["code"] != 1:
-        raise provider_error("goplus", "API_REJECTED", status=200, attempts=acquired.attempts, api_code=body.get("code"))
+        api_code = body.get("code")
+        if api_code == 4029:
+            set_provider_cooldown("goplus", GOPLUS_RATE_LIMIT_COOLDOWN_SECONDS, "API_REJECTED", status=200, api_code=4029)
+        raise provider_error("goplus", "API_REJECTED", status=200, attempts=acquired.attempts, api_code=api_code)
     if not isinstance(body.get("result"), dict):
         raise provider_error("goplus", "INVALID_SCHEMA", status=200, attempts=acquired.attempts)
     acquired_at = acquired.retrieved_at_ms

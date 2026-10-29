@@ -114,12 +114,19 @@ def _check_cooldown(provider):
         return
     # This is the retained cause of a provider-requested pause, not a new
     # provider failure. Do not renew its diagnostic timestamp or HTTP counters.
-    raise ProviderReadError(provider, cooldown["reason"], status=cooldown["status"], attempts=0)
+    raise ProviderReadError(provider, cooldown["reason"], status=cooldown["status"], attempts=0, api_code=cooldown.get("api_code"))
 
 
-def _respect_retry_after(provider, response, error):
-    delay = _retry_after(response)
-    if response is None or response.status_code not in RETRY_HTTP_STATUSES or delay is None or delay <= 0:
+def set_provider_cooldown(provider, delay_seconds, reason, *, status=None, api_code=None):
+    if provider not in _PREFIX:
+        raise ValueError("Unknown public evidence provider")
+    if reason not in _REASONS and not re.fullmatch(r"HTTP_[1-5][0-9]{2}", reason):
+        raise ValueError("Provider diagnostic reason is not a fixed code")
+    try:
+        delay = float(delay_seconds)
+    except (ValueError, TypeError):
+        return
+    if delay <= 0 or math.isnan(delay):
         return
     until = _cooldown_now() + delay
     unrepresentable = not math.isfinite(until)
@@ -129,12 +136,26 @@ def _respect_retry_after(provider, response, error):
         until = sys.float_info.max
     previous = _COOLDOWNS.get(provider)
     if previous is None or (not previous.get("unrepresentable_delay") and (unrepresentable or until > previous["until"])):
-        # There are only two fixed public endpoints in this helper. Long valid
-        # pauses are retained, never slept past the original per-read budget or
-        # shortened to issue a request earlier than the provider permits.
-        _COOLDOWNS[provider] = {"until": until, "reason": error.code.removeprefix(_PREFIX[provider] + "_"), "status": error.provider_http_status}
+        # Retain provider-requested pauses with bounded state.
+        entry = {"until": until, "reason": reason, "status": status}
+        if api_code is not None:
+            entry["api_code"] = api_code
         if unrepresentable:
-            _COOLDOWNS[provider]["unrepresentable_delay"] = True
+            entry["unrepresentable_delay"] = True
+        _COOLDOWNS[provider] = entry
+
+
+def _respect_retry_after(provider, response, error):
+    delay = _retry_after(response)
+    if response is None or response.status_code not in RETRY_HTTP_STATUSES or delay is None or delay <= 0:
+        return
+    set_provider_cooldown(
+        provider,
+        delay,
+        error.code.removeprefix(_PREFIX[provider] + "_"),
+        status=error.provider_http_status,
+        api_code=error.provider_api_code,
+    )
 
 
 async def read_public_json(client, provider, *, token=None, addresses=None):

@@ -1,4 +1,5 @@
 """Merchant configuration and public payment-contract regressions; no network."""
+import asyncio
 import base64
 import json
 import os
@@ -44,6 +45,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("503", route["responses"])
         prepay = schema["paths"]["/v1/pass/prepay"]["post"]
         self.assertEqual(prepay["security"], [{"x402PaymentSignature": []}])
+
+    def test_discovery_and_crawler_routes(self):
+        schema = app.app.openapi()
+        self.assertIn("/robots.txt", schema["paths"])
+        self.assertIn("/.well-known/x402", schema["paths"])
+        self.assertIn("/.well-known/x402.json", schema["paths"])
+        robots = asyncio.run(app.robots_txt())
+        self.assertEqual(robots.body, b"User-agent: *\nAllow: /\n")
+        self.assertTrue(robots.media_type.startswith("text/plain"))
 
 
 if __name__ == "__main__":

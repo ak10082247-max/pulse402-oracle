@@ -252,3 +252,42 @@ def test_cooldown_keys_cannot_be_added_by_unknown_provider_or_untrusted_endpoint
                 with pytest.raises(ValueError): await reads.read_public_json(client, **args)
     asyncio.run(run())
     assert reads._COOLDOWNS == {} and reads.provider_diagnostics()["dexscreener"]["request_count"] == 0
+
+
+def test_goplus_frequency_limit_4029_sets_cooldown_and_blocks_repeat_reads(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(reads, "_cooldown_now", lambda: clock[0])
+    calls = []
+    def respond(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(200, json={"code": 4029, "message": "Frequency limit exceeded"})
+        return httpx.Response(200, json={"code": 1, "result": {base_dex.TOKENS["WETH"]: {"token_symbol": "WETH", "is_honeypot": "0"}}})
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            from engine import threat_intel
+            with pytest.raises(reads.ProviderReadError) as err:
+                await threat_intel.fetch_threat_intel_state(client)
+            assert err.value.code == "GOPLUS_API_REJECTED"
+            assert err.value.provider_api_code == 4029
+            assert err.value.provider_http_status == 200
+            assert reads._COOLDOWNS.get("goplus") is not None
+            assert reads._COOLDOWNS["goplus"]["reason"] == "API_REJECTED"
+            assert reads._COOLDOWNS["goplus"]["api_code"] == 4029
+            assert reads._COOLDOWNS["goplus"]["status"] == 200
+            assert reads._COOLDOWNS["goplus"]["until"] == 115.0
+
+            # During cooldown, read_public_json raises without HTTP call
+            with pytest.raises(reads.ProviderReadError) as cached:
+                await reads.read_public_json(client, "goplus", addresses=[base_dex.TOKENS["WETH"]])
+            assert cached.value.code == "GOPLUS_API_REJECTED"
+            assert cached.value.provider_api_code == 4029
+            assert cached.value.attempts == 0
+            assert len(calls) == 1
+
+            # After cooldown expires, read succeeds
+            clock[0] = 115.001
+            res = await threat_intel.fetch_threat_intel_state(client)
+            assert len(calls) == 2
+            assert res["timestamp_ms"] is not None
+    asyncio.run(run())

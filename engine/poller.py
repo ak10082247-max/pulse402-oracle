@@ -144,7 +144,12 @@ async def run_single_poll_cycle(client):
                 _ACQUISITION_METRICS[feed] = metrics
                 # Log failures and recoveries at operator level. Repeated
                 # successes remain available in health without noisy INFO logs.
-                level = logging.WARNING if error_code else logging.INFO if previous_error else logging.DEBUG
+                # Repeated identical errors remain at DEBUG to prevent log flooding.
+                level = (
+                    logging.WARNING
+                    if (error_code and error_code != previous_error)
+                    else (logging.INFO if (not error_code and previous_error) else logging.DEBUG)
+                )
                 logger.log(level, "feed_acquisition %s", json.dumps({"feed": feed, **metrics}, sort_keys=True))
             if feed in _FEED_EVENTS:
                 _FEED_EVENTS[feed].set()
