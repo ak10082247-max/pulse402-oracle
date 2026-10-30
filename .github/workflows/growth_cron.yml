@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_PAT || github.token }}
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_PAT || github.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,7 +29,8 @@ jobs:
 
       - name: Run Autonomous Growth Engine
         env:
-          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_PAT || github.token }}
+          GITHUB_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_PAT || github.token }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
         run: |

@@ -28,6 +28,9 @@ DEFAULT_KEYWORDS = [
     "base arbitrage",
     "aerodrome bot",
     "uniswap v3 base",
+    "pump fun bot",
+    "solana sniper bot",
+    "raydium bot",
     "x402",
     "coinbase agentkit",
     "elizaos agent",
@@ -213,6 +216,7 @@ Current Live Oracle Feeds:
 • Base DEX Real-Time Liquidity (/v1/pulse/base-liquidity): Live Aerodrome slip, Uniswap v3 fee tiers, depth, and spread across WETH/USDC/AERO.{liq_sample}
 • Cross-DEX Arbitrage Routes (/v1/pulse/arb-routes): Zero-risk cyclic route discovery with net-profit thresholding.
 • GoPlus Threat Intel (/v1/pulse/threat-intel): Pre-trade honeypot detection, blacklist checks, and token safety scoring.
+• Solana Pump.fun & Raydium Velocity (/v1/pulse/solana-velocity): Live trending meme coin orderflow, 5m volume, price delta, and bonding curve status for Solana sniper bots.
 
 Tiered Pricing:
 - Tier 1 (Pre-Trade Safety & Liquidity): $0.005 USDC per call
@@ -273,7 +277,7 @@ def main():
     parser.add_argument("--keywords", nargs="+", default=DEFAULT_KEYWORDS, help="Keywords to search on GitHub")
     args = parser.parse_args()
 
-    github_pat = os.getenv("GITHUB_PAT") or os.getenv("GITHUB_TOKEN")
+    github_pat = os.getenv("GH_PAT") or os.getenv("GITHUB_PAT") or os.getenv("GITHUB_TOKEN")
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
 
