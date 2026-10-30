@@ -1,1 +1,37 @@
-{}
+{
+  "hi@sayo.wtf": {
+    "contacted_at": 1793402330,
+    "keyword": "polymarket agent",
+    "name": "Sayo",
+    "repo": "wtfsayo/polymarket-plugin",
+    "status": "dry_run"
+  },
+  "logjam71.venus@icloud.com": {
+    "contacted_at": 1793402330,
+    "keyword": "base arbitrage",
+    "name": "CreatorHero",
+    "repo": "Dujo6p9f7aa4/how-to-launch-arbitrage-bot-execution-parameters",
+    "status": "dry_run"
+  },
+  "michaelbordash@gmail.com": {
+    "contacted_at": 1793402330,
+    "keyword": "polymarket bot",
+    "name": "Michael Bordash",
+    "repo": "mbordash/DRADIS",
+    "status": "dry_run"
+  },
+  "saman@macbook-timur.local": {
+    "contacted_at": 1793402330,
+    "keyword": "polymarket agent",
+    "name": "Timur",
+    "repo": "tsamandarov-afk/polymarket-agent",
+    "status": "dry_run"
+  },
+  "tradewr333@gmail.com": {
+    "contacted_at": 1793402330,
+    "keyword": "polymarket agent",
+    "name": "Renato",
+    "repo": "tradewr333-lgtm/degenscan-intel",
+    "status": "dry_run"
+  }
+}
