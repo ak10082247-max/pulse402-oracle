@@ -72,6 +72,14 @@
       "amount_atomic": "10000",
       "tier": 2,
       "description": "Pinned-block distinct-pool gross round-trip quotes"
+    },
+    {
+      "path": "/v1/pulse/solana-velocity",
+      "method": "GET",
+      "price": "0.01",
+      "amount_atomic": "10000",
+      "tier": 2,
+      "description": "Live Solana Pump.fun & Raydium trending token velocity and liquidity depth"
     }
   ]
 }

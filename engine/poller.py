@@ -13,16 +13,18 @@ from .base_dex import fetch_base_liquidity_state, release_quote_cycle
 from .polymarket import fetch_polymarket_velocity_state
 from .threat_intel import fetch_threat_intel_state
 from .arb_router import fetch_arb_routes_state
+from .solana_dex import fetch_solana_velocity_state
 from .base_quotes import QuoteError
 
 logger = logging.getLogger("pulse402.poller")
 TTL_SECONDS = 10
-FEEDS = ("base-liquidity", "polymarket-velocity", "threat-intel", "arb-routes")
+FEEDS = ("base-liquidity", "polymarket-velocity", "threat-intel", "arb-routes", "solana-velocity")
 STATE = {
     "base_liquidity": [],
     "polymarket_velocity": [],
     "threat_intel": {},
     "arb_routes": [],
+    "solana_velocity": [],
     "last_poll_ms": 0,
     "poll_count": 0,
     "status": "initializing",
@@ -140,6 +142,7 @@ async def run_single_poll_cycle(client):
         fetch_polymarket_velocity_state,
         fetch_threat_intel_state,
         fetch_arb_routes_state,
+        fetch_solana_velocity_state,
     )
 
     async def acquire_one(feed, callback):

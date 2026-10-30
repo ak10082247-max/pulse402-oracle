@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from engine import arb_router, base_dex, poller, polymarket, threat_intel
+from engine import arb_router, base_dex, poller, polymarket, solana_dex, threat_intel
 
 
 def test_actual_book_prices_are_sorted_and_depth_is_not_tvl():
@@ -690,3 +690,41 @@ def test_http200_contract_revert_never_retries_another_provider():
     result = asyncio.run(run())
     assert isinstance(result[0], base_dex.QuoteError)
     assert calls == ["https://base-rpc.publicnode.com"]
+
+
+def test_solana_velocity_fetch_parses_real_structure():
+    def respond(request):
+        if "token-boosts" in str(request.url):
+            return httpx.Response(200, json=[
+                {"chainId": "solana", "tokenAddress": "So11111111111111111111111111111111111111112", "amount": 100, "description": "Solana"},
+                {"chainId": "ethereum", "tokenAddress": "0x123", "amount": 50}
+            ])
+        elif "dex/search" in str(request.url):
+            return httpx.Response(200, json={
+                "pairs": [
+                    {
+                        "chainId": "solana",
+                        "dexId": "raydium",
+                        "pairAddress": "Pair123",
+                        "baseToken": {"address": "TokenPump111pump", "symbol": "PUMP", "name": "PumpCoin"},
+                        "priceUsd": "0.0123",
+                        "priceChange": {"m5": 12.5},
+                        "volume": {"m5": 50000},
+                        "liquidity": {"usd": 100000},
+                        "fdv": 500000,
+                        "pairCreatedAt": 1700000000000
+                    }
+                ]
+            })
+        return httpx.Response(404)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            return await solana_dex.fetch_solana_velocity_state(client)
+
+    res = asyncio.run(run())
+    assert isinstance(res, list) and len(res) == 1
+    assert res[0]["mint"] == "TokenPump111pump"
+    assert res[0]["is_pump_fun"] is True
+    assert res[0]["chain"] == "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    assert type(res[0]["timestamp_ms"]) is int

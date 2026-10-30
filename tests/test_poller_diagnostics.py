@@ -14,6 +14,7 @@ SECRET = "PRIVATE_PROVIDER_TOKEN_AND_PAID_RECORD"
 CALLBACKS = (
     "fetch_base_liquidity_state", "fetch_polymarket_velocity_state",
     "fetch_threat_intel_state", "fetch_arb_routes_state",
+    "fetch_solana_velocity_state",
 )
 
 

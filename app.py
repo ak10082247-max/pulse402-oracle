@@ -53,6 +53,7 @@ FEED_AMOUNTS = {
     "threat-intel": TIER1_AMOUNT_MICRO,
     "polymarket-velocity": TIER2_AMOUNT_MICRO,
     "arb-routes": TIER2_AMOUNT_MICRO,
+    "solana-velocity": TIER2_AMOUNT_MICRO,
 }
 
 FEED_PRICES = {
@@ -60,6 +61,7 @@ FEED_PRICES = {
     "threat-intel": TIER1_PRICE_USDC,
     "polymarket-velocity": TIER2_PRICE_USDC,
     "arb-routes": TIER2_PRICE_USDC,
+    "solana-velocity": TIER2_PRICE_USDC,
 }
 
 TOOL_AMOUNTS = {
@@ -67,6 +69,7 @@ TOOL_AMOUNTS = {
     "pulse_threat_intel": TIER1_AMOUNT_MICRO,
     "pulse_polymarket_velocity": TIER2_AMOUNT_MICRO,
     "pulse_arb_routes": TIER2_AMOUNT_MICRO,
+    "pulse_solana_velocity": TIER2_AMOUNT_MICRO,
 }
 
 PRICE_PER_CALL_USDC = TIER1_PRICE_USDC
@@ -89,7 +92,13 @@ def is_ssrf_safe(target_url: str) -> bool:
     return True
 
 # Coinbase x402 Bazaar Discovery Metadata (<500 chars descriptions, complete JSON schemas)
-BAZAAR_METADATA = {'/v1/pulse/base-liquidity': {'description': 'Base token liquidity observations, measured pool '
+BAZAAR_METADATA = {
+    '/v1/pulse/solana-velocity': {
+        'description': 'Real-time Solana Pump.fun and Raydium token velocity, trending boosted tokens, 5m volume, and price delta for Solana sniper bots.',
+        'inputExample': {},
+        'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema', 'type': 'object', 'properties': {}, 'additionalProperties': False},
+    },
+'/v1/pulse/base-liquidity': {'description': 'Base token liquidity observations, measured pool '
                                              'balance changes after warm-up, and unsigned '
                                              'amount-specific USDC quotes for $100, $1,000 and '
                                              '$10,000, pinned to one verified Base block. Coverage '
@@ -362,13 +371,13 @@ async def read_json_object(request):
         raise payments.PaymentError("INVALID_JSON_OBJECT", 400)
 
 
-FEED_TOOL_MAP = {"pulse_base_liquidity": "base-liquidity", "pulse_polymarket_velocity": "polymarket-velocity", "pulse_threat_intel": "threat-intel", "pulse_arb_routes": "arb-routes"}
+FEED_TOOL_MAP = {"pulse_base_liquidity": "base-liquidity", "pulse_polymarket_velocity": "polymarket-velocity", "pulse_threat_intel": "threat-intel", "pulse_arb_routes": "arb-routes", "pulse_solana_velocity": "solana-velocity"}
 
 
 def feed_arguments(feed_name, arguments, *, query=False):
     if not isinstance(arguments, dict):
         raise payments.PaymentError("INVALID_ARGUMENTS", 400)
-    allowed = {"base-liquidity": {"symbol"}, "polymarket-velocity": {"min_velocity_pct"}, "arb-routes": {"min_spread_bps"}, "threat-intel": {"text_to_sanitize"}}[feed_name]
+    allowed = {"base-liquidity": {"symbol"}, "polymarket-velocity": {"min_velocity_pct"}, "arb-routes": {"min_spread_bps"}, "threat-intel": {"text_to_sanitize"}, "solana-velocity": set()}[feed_name]
     if set(arguments) - allowed:
         raise payments.PaymentError("UNSUPPORTED_ARGUMENTS", 400)
     result = dict(arguments)
@@ -488,13 +497,15 @@ async def health_check():
             "/v1/pulse/base-liquidity",
             "/v1/pulse/polymarket-velocity",
             "/v1/pulse/threat-intel",
-            "/v1/pulse/arb-routes"
+            "/v1/pulse/arb-routes",
+            "/v1/pulse/solana-velocity"
         ],
         "preview_feeds": [
             "/v1/preview/base-liquidity",
             "/v1/preview/polymarket-velocity",
             "/v1/preview/threat-intel",
-            "/v1/preview/arb-routes"
+            "/v1/preview/arb-routes",
+            "/v1/preview/solana-velocity"
         ],
         "payout_wallet": PAYOUT_WALLET_ADDRESS,
         "solana_payout_wallet": SOLANA_PAYOUT_WALLET,
@@ -747,7 +758,8 @@ async def get_agent_card(request: Request):
             "crypto-market-data",
             "threat-intel",
             "polymarket-velocity",
-            "arbitrage-radar"
+            "arbitrage-radar",
+            "solana-velocity"
         ],
         "securitySchemes": {
             "x402PaymentSignature": {
@@ -762,10 +774,12 @@ async def get_agent_card(request: Request):
             {"path": "/v1/pulse/polymarket-velocity", "method": "GET", "price": "$0.01 USDC", "description": "Acquired Polymarket history and orderbook depth (Tier 2)"},
             {"path": "/v1/pulse/threat-intel", "method": "GET", "price": "$0.005 USDC", "description": "Sampled provider token risks and scoped text sanitization (Tier 1)"},
             {"path": "/v1/pulse/arb-routes", "method": "GET", "price": "$0.01 USDC", "description": "Cross-DEX arbitrage routes and profitability simulation (Tier 2)"},
+            {"path": "/v1/pulse/solana-velocity", "method": "GET", "price": "$0.01 USDC", "description": "Real-time Solana Pump.fun and Raydium token velocity and trending volume (Tier 2)"},
             {"path": "/v1/preview/base-liquidity", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of Base DEX liquidity"},
             {"path": "/v1/preview/polymarket-velocity", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of Polymarket velocity"},
             {"path": "/v1/preview/threat-intel", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of threat intel"},
-            {"path": "/v1/preview/arb-routes", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of arb routes"}
+            {"path": "/v1/preview/arb-routes", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of arb routes"},
+            {"path": "/v1/preview/solana-velocity", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of Solana velocity"}
         ]
     }
 
@@ -835,6 +849,16 @@ async def get_arb_routes(request: Request):
 # PREPAY SESSION PASS FOR HFT AGENTS
 # ==============================================================================
 
+
+@app.get("/v1/pulse/solana-velocity")
+async def get_solana_velocity(request: Request):
+    return await handle_feed_response(request, "solana-velocity", "/v1/pulse/solana-velocity")
+
+@app.get("/v1/preview/solana-velocity")
+async def preview_solana_velocity():
+    telemetry.record_preview()
+    return JSONResponse(preview_payload("solana-velocity"), headers={"Cache-Control": "no-store"})
+
 @app.post("/v1/pass/prepay")
 async def prepay_session_pass(request: Request):
     try:
@@ -854,6 +878,20 @@ async def prepay_session_pass(request: Request):
 # ==============================================================================
 
 MCP_TOOLS = [
+    {
+        "name": "pulse_solana_velocity",
+        "description": "Real-time Solana Pump.fun and Raydium token velocity, trending boosted tokens, 5m price change, volume, liquidity, and bonding curve status for Solana sniper bots.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        },
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True
+        }
+    },
     {
         "name": "pulse_base_liquidity",
         "description": "Base token liquidity observations, measured pool balance changes after warm-up, and unsigned amount-specific USDC quotes for $100, $1,000 and $10,000, pinned to one verified Base block. Coverage and quote provenance are included.",

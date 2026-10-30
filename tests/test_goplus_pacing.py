@@ -11,6 +11,7 @@ CALLBACKS = (
     ("polymarket-velocity", "fetch_polymarket_velocity_state"),
     ("threat-intel", "fetch_threat_intel_state"),
     ("arb-routes", "fetch_arb_routes_state"),
+    ("solana-velocity", "fetch_solana_velocity_state"),
 )
 
 
@@ -63,10 +64,10 @@ def test_background_cycle_paces_threat_intel_but_foreground_always_acquires(monk
         assert sorted(calls) == sorted(f for f, _ in CALLBACKS)
         calls.clear(); clock[0] += 8
         await background()                       # 8s later: GoPlus paced
-        assert "threat-intel" not in calls and len(calls) == 3
+        assert "threat-intel" not in calls and len(calls) == len(CALLBACKS) - 1
         calls.clear(); clock[0] += 1
         await poller._refresh_singleflight()     # foreground: never paced
-        assert "threat-intel" in calls and len(calls) == 4
+        assert "threat-intel" in calls and len(calls) == len(CALLBACKS)
         calls.clear(); clock[0] += poller.BACKGROUND_MIN_INTERVAL_SECONDS["threat-intel"]
         await background()                       # interval elapsed: GoPlus again
         assert "threat-intel" in calls

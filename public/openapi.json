@@ -445,6 +445,54 @@
           }
         }
       }
+    },
+    "/v1/preview/solana-velocity": {
+      "get": {
+        "summary": "Preview Solana Velocity",
+        "operationId": "preview_solana_velocity_v1_preview_solana_velocity_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pulse/solana-velocity": {
+      "get": {
+        "summary": "Get Solana Velocity",
+        "operationId": "get_solana_velocity_v1_pulse_solana_velocity_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "402": {
+            "description": "Verified x402 payment or purchased credit required."
+          },
+          "503": {
+            "description": "Fresh fulfillment unavailable or settlement requires recovery; inspect charged field before retrying."
+          }
+        },
+        "description": "Real-time Solana Pump.fun and Raydium token velocity, trending boosted tokens, 5m price change, volume, liquidity, and bonding curve status for Solana sniper bots.",
+        "security": [
+          {
+            "x402PaymentSignature": []
+          },
+          {
+            "pulseSession": []
+          }
+        ],
+        "parameters": []
+      }
     }
   },
   "components": {
