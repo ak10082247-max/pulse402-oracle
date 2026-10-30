@@ -15,7 +15,7 @@ from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 import httpx
 
-from engine.poller import start_poller_loop, get_feed_state, get_feed_diagnostics, STATE
+from engine.poller import start_poller_loop, get_feed_state, get_feed_diagnostics, STATE, is_paced_feed_healthy, BACKGROUND_MIN_INTERVAL_SECONDS
 from engine.provider_reads import provider_diagnostics
 from engine.threat_intel import sanitize_untrusted_text
 from engine import payments
@@ -403,8 +403,14 @@ def preview_payload(feed_name):
     count = len(data) if isinstance(data, list) else None
     # Public discovery exposes coverage and acquisition health, never the paid
     # market records, prices, orderbooks, threat addresses or route amounts.
+    status = state.get("status")
+    if status == "stale" and is_paced_feed_healthy(feed_name, state):
+        # Paid calls acquire a fresh observation on demand; the original
+        # observation time below is never renewed.
+        status = "ready_on_demand"
     return {"status": "preview", "tier": "free_preview", "feed": "/v1/pulse/" + feed_name,
-        "sample_type": "coverage_summary", "data": {"records_available": count, "feed_status": state.get("status"), "observed_at_ms": state.get("timestamp_ms")},
+        "sample_type": "coverage_summary", "data": {"records_available": count, "feed_status": status, "observed_at_ms": state.get("timestamp_ms"),
+        "refresh_mode": "on_demand_paced" if feed_name in BACKGROUND_MIN_INTERVAL_SECONDS else "background"},
         "notice": "Live records require a verified x402 payment or a purchased session credit."}
 
 # ==============================================================================
@@ -419,11 +425,11 @@ async def health_check():
         "service": SERVICE_NAME,
         "version": SERVICE_VERSION,
         "revision": os.getenv("RENDER_GIT_COMMIT", "local"),
-        "engine_status": "healthy" if all(feed.get("status") == "ok" for feed in feeds.values()) else "degraded",
+        "engine_status": "healthy" if all(feed.get("status") == "ok" or is_paced_feed_healthy(name, feed) for name, feed in feeds.items()) else "degraded",
         "last_refresh_status": STATE.get("status", "unknown"),
         "last_poll_ms": STATE.get("last_poll_ms", 0),
         "total_poll_cycles": STATE.get("poll_count", 0),
-        "feed_status": {name: {"status": feed.get("status"), "observed_at_ms": feed.get("timestamp_ms"), "age_ms": feed.get("age_ms"), **get_feed_diagnostics(name)} for name, feed in feeds.items()},
+        "feed_status": {name: {"status": feed.get("status"), "observed_at_ms": feed.get("timestamp_ms"), "age_ms": feed.get("age_ms"), "refresh_mode": "on_demand_paced" if name in BACKGROUND_MIN_INTERVAL_SECONDS else "background", **get_feed_diagnostics(name)} for name, feed in feeds.items()},
         "public_provider_status": provider_diagnostics(),
         "active_feeds": [
             "/v1/pulse/base-liquidity",
@@ -445,6 +451,99 @@ async def health_check():
 @app.get("/robots.txt", response_class=PlainTextResponse)
 async def robots_txt():
     return PlainTextResponse("User-agent: *\nAllow: /\n", media_type="text/plain; charset=utf-8")
+
+REPOSITORY_URL = "https://github.com/ak10082247-max/pulse402-oracle"
+SECURITY_CONTACT_URL = REPOSITORY_URL + "/security/advisories/new"
+ISSUES_URL = REPOSITORY_URL + "/issues"
+
+
+def _simple_page(title, body_html):
+    return HTMLResponse(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        f"<title>{title} - Pulse402 Oracle</title>"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>"
+        "<body style=\"font-family:system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.55\">"
+        f"<h1>{title}</h1>{body_html}"
+        "<hr><p><a href=\"/\">Home</a> &middot; <a href=\"/about\">About</a> &middot; <a href=\"/contact\">Contact</a> &middot; "
+        "<a href=\"/terms\">Terms</a> &middot; <a href=\"/privacy\">Privacy</a> &middot; <a href=\"/llms.txt\">llms.txt</a></p>"
+        "</body></html>"
+    )
+
+
+@app.get("/.well-known/security.txt", response_class=PlainTextResponse)
+@app.get("/security.txt", response_class=PlainTextResponse)
+async def security_txt():
+    # RFC 9116: Contact and Expires are required.
+    return PlainTextResponse(
+        f"Contact: {SECURITY_CONTACT_URL}\n"
+        "Expires: 2027-10-30T00:00:00.000Z\n"
+        "Preferred-Languages: en\n"
+        "Canonical: https://pulse402-oracle.onrender.com/.well-known/security.txt\n"
+        f"Policy: {REPOSITORY_URL}/security\n",
+        media_type="text/plain; charset=utf-8",
+    )
+
+
+@app.get("/.well-known/glama.json")
+async def glama_json():
+    # Glama MCP directory ownership claim.
+    return {"$schema": "https://glama.ai/mcp/schemas/server.json", "maintainers": ["ak10082247-max"]}
+
+
+@app.get("/about", response_class=HTMLResponse)
+async def about_page():
+    return _simple_page("About", (
+        "<p>Pulse402 is a pay-per-call data oracle for autonomous AI agents. It serves four read-only feeds "
+        "(Base liquidity and quotes, Polymarket probability velocity, GoPlus token-risk evidence with text sanitization, "
+        "and Base cross-pool round-trip quotes) over HTTP and MCP.</p>"
+        f"<p>Each call costs ${PRICE_PER_CALL_USDC} USDC via the x402 V2 protocol on Base ({BASE_NETWORK}) or Solana "
+        f"({SOLANA_NETWORK}). No account or API key is required. Every response keeps its original observation time and a "
+        "10-second TTL; provider outages are reported before any payment settles.</p>"
+        "<p>Machine-readable discovery: <a href=\"/.well-known/x402\">/.well-known/x402</a>, "
+        "<a href=\"/openapi.json\">/openapi.json</a>, <a href=\"/.well-known/mcp.json\">/.well-known/mcp.json</a>, "
+        "<a href=\"/.well-known/agent-card.json\">/.well-known/agent-card.json</a>, <a href=\"/skill.md\">/skill.md</a>.</p>"
+        f"<p>Source: <a href=\"{REPOSITORY_URL}\">{REPOSITORY_URL}</a></p>"
+    ))
+
+
+@app.get("/contact", response_class=HTMLResponse)
+async def contact_page():
+    return _simple_page("Contact", (
+        f"<p>Support and integration questions: <a href=\"{ISSUES_URL}\">GitHub issues</a>.</p>"
+        f"<p>Security reports: <a href=\"{SECURITY_CONTACT_URL}\">private security advisory</a> "
+        "(see <a href=\"/.well-known/security.txt\">security.txt</a>).</p>"
+        "<p>Payment questions: include the resource path, network and settlement transaction from your "
+        "<code>PAYMENT-RESPONSE</code> header. Never send private keys or signed authorizations you have not already submitted.</p>"
+    ))
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page():
+    return _simple_page("Terms of Use", (
+        "<p>Pulse402 provides machine-readable market and risk observations on an as-is basis, without warranty. "
+        "Data comes from public on-chain reads and third-party providers and may be incomplete, delayed or wrong. "
+        "Nothing returned is financial, investment or security advice, and a missing risk flag is not an all-clear.</p>"
+        f"<p>Each paid call costs ${PRICE_PER_CALL_USDC} USDC and is charged only after the requested data has been "
+        "acquired and validated for delivery. Settled on-chain payments cannot be reversed by the service. If a response reports "
+        "<code>charged=unknown</code>, retry with the same payment authorization or idempotency key to recover the delivery; "
+        "do not sign a replacement payment.</p>"
+        "<p>Prepaid sessions ($5 USDC for 6,000 calls, valid for seven days) activate only after verified settlement. "
+        "Abuse, attempts to bypass payment, or attacks on the service may be blocked.</p>"
+    ))
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page():
+    return _simple_page("Privacy", (
+        "<p>Pulse402 needs no account, email, cookie or API key.</p>"
+        "<p>The hosting platform records standard request logs (time, path, status code and network address). For paid calls, "
+        "the service stores the settlement record needed for receipts, replay protection and delivery recovery: payer wallet "
+        "address, network, amount, resource path and transaction reference. Blockchain payments are public by nature.</p>"
+        "<p>For paid calls the prepared response (including any sanitizer output) is retained with that settlement record so it "
+        "can be re-delivered without a second charge. Data is not sold "
+        f"or used for advertising. Questions: <a href=\"{ISSUES_URL}\">GitHub issues</a>.</p>"
+    ))
+
 
 @app.get("/.well-known/x402")
 @app.get("/.well-known/x402.json")

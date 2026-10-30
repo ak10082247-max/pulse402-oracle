@@ -55,6 +55,18 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(robots.body, b"User-agent: *\nAllow: /\n")
         self.assertTrue(robots.media_type.startswith("text/plain"))
 
+    def test_trust_and_directory_pages_exist(self):
+        paths = app.app.openapi()["paths"]
+        for route in ("/.well-known/security.txt", "/.well-known/glama.json", "/about", "/contact", "/terms", "/privacy"):
+            self.assertIn(route, paths)
+        security = asyncio.run(app.security_txt()).body.decode()
+        self.assertIn("Contact: https://", security)
+        self.assertIn("Expires: ", security)
+        glama = asyncio.run(app.glama_json())
+        self.assertEqual(glama["maintainers"], ["ak10082247-max"])
+        for page in (app.about_page, app.contact_page, app.terms_page, app.privacy_page):
+            self.assertIn(b"<h1>", asyncio.run(page()).body)
+
 
 if __name__ == "__main__":
     unittest.main()

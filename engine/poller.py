@@ -1,6 +1,7 @@
 """Shared on-demand/background feed acquisition with original observation ages."""
 
 import asyncio
+import contextvars
 import copy
 import json
 import logging
@@ -38,6 +39,34 @@ MIN_POLL_DELAY_SECONDS = 0.5
 REFRESH_HEADROOM_SECONDS = 0.5
 _LAST_REFRESH_INFO = None
 _POLL_CLIENT = None
+# Rate-limited public providers are not re-polled on every background cycle.
+# GoPlus (threat-intel) rejects sustained ~8s polling with api_code 4029, which
+# spends its quota while nobody is buying. Paid/foreground requests still
+# acquire a fresh observation on demand; nothing is ever re-timestamped.
+BACKGROUND_MIN_INTERVAL_SECONDS = {"threat-intel": 30.0}
+_LAST_ATTEMPT_MONOTONIC = {}
+_BACKGROUND = contextvars.ContextVar("pulse402_background_refresh", default=False)
+_CYCLE_SKIP = contextvars.ContextVar("pulse402_cycle_skip", default=frozenset())
+_REFRESH_SKIPPED = frozenset()
+
+
+def _background_skips(now=None):
+    now = time.monotonic() if now is None else now
+    return frozenset(
+        feed
+        for feed, interval in BACKGROUND_MIN_INTERVAL_SECONDS.items()
+        if feed in _LAST_ATTEMPT_MONOTONIC and now - _LAST_ATTEMPT_MONOTONIC[feed] < interval
+    )
+
+
+def is_paced_feed_healthy(feed_name, state=None):
+    """A paced (on-demand) feed is healthy when its last real acquisition succeeded."""
+    if feed_name not in BACKGROUND_MIN_INTERVAL_SECONDS:
+        return False
+    state = get_feed_state(feed_name) if state is None else state
+    if state.get("status") not in ("ok", "stale"):
+        return False
+    return feed_name not in _ERRORS and _ACQUISITION_METRICS.get(feed_name, {}).get("error_code") is None
 
 
 def _safe_error_details(error):
@@ -114,6 +143,7 @@ async def run_single_poll_cycle(client):
     )
 
     async def acquire_one(feed, callback):
+        _LAST_ATTEMPT_MONOTONIC[feed] = time.monotonic()
         started = time.perf_counter()
         completed, error_code, http_status, api_code = False, None, None, None
         previous_error = _ERRORS.get(feed)
@@ -154,8 +184,9 @@ async def run_single_poll_cycle(client):
             if feed in _FEED_EVENTS:
                 _FEED_EVENTS[feed].set()
 
+    skipped = _CYCLE_SKIP.get()
     await asyncio.gather(
-        *(acquire_one(feed, callback) for feed, callback in zip(FEEDS, callbacks))
+        *(acquire_one(feed, callback) for feed, callback in zip(FEEDS, callbacks) if feed not in skipped)
     )
     STATE["last_poll_ms"] = int(time.time() * 1000)
     STATE["poll_count"] += 1
@@ -256,12 +287,20 @@ def _next_poll_delay(poll_interval_seconds, elapsed_seconds, now_ms, refresh_inf
     return max(MIN_POLL_DELAY_SECONDS, min(cadence_delay, until_start))
 
 
-async def _refresh_singleflight(feed_name=None):
-    global _REFRESH_TASK, _FEED_EVENTS
+async def _refresh_singleflight(feed_name=None, *, _rejoined=False):
+    global _REFRESH_TASK, _FEED_EVENTS, _REFRESH_SKIPPED
     if _REFRESH_TASK is None or _REFRESH_TASK.done():
+        # Only the background loop paces rate-limited providers. A foreground
+        # (paid) refresh always attempts every feed.
+        skipped = _background_skips() if _BACKGROUND.get() else frozenset()
         _FEED_EVENTS = {feed: asyncio.Event() for feed in FEEDS}
         events = _FEED_EVENTS
-        _REFRESH_TASK = asyncio.create_task(_timed_refresh())
+        token = _CYCLE_SKIP.set(skipped)
+        try:
+            _REFRESH_TASK = asyncio.create_task(_timed_refresh())
+        finally:
+            _CYCLE_SKIP.reset(token)
+        _REFRESH_SKIPPED = skipped
 
         # A refresh can fail before any callback starts. Always release waiters
         # and retrieve task exceptions even if their request was cancelled.
@@ -273,6 +312,7 @@ async def _refresh_singleflight(feed_name=None):
 
         _REFRESH_TASK.add_done_callback(settled)
     task = _REFRESH_TASK
+    skipped_here = _REFRESH_SKIPPED
     try:
         if feed_name is None:
             await asyncio.wait_for(asyncio.shield(task), REFRESH_TIMEOUT_SECONDS)
@@ -283,6 +323,10 @@ async def _refresh_singleflight(feed_name=None):
     finally:
         if task.done() and _REFRESH_TASK is task:
             _REFRESH_TASK = None
+    if feed_name is not None and feed_name in skipped_here and not _rejoined:
+        # A paying caller joined a background cycle that paced this feed.
+        # Acquire it now instead of returning the older observation.
+        await _refresh_singleflight(feed_name, _rejoined=True)
 
 
 def get_feed_state(feed_name):
@@ -334,6 +378,7 @@ async def start_poller_loop(poll_interval_seconds=8):
         raise RuntimeError("A background feed client already has an owner")
     async with _feed_client() as client:
         _POLL_CLIENT = client
+        background = _BACKGROUND.set(True)
         try:
             while True:
                 started = time.monotonic()
@@ -352,6 +397,7 @@ async def start_poller_loop(poll_interval_seconds=8):
                     )
                 )
         finally:
+            _BACKGROUND.reset(background)
             # Shielded foreground waiters may share this task. Drain the work
             # before the client owner closes its connection pool on shutdown.
             pending = _REFRESH_TASK
