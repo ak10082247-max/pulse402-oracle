@@ -1035,7 +1035,7 @@ async def version():
 # DEVELOPER & AGENT LIVE DASHBOARD (GET /)
 # ==============================================================================
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def live_dashboard(request: Request):
     index_path = "public/index.html"
     if os.path.exists(index_path):
