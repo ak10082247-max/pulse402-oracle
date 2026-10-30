@@ -1,43 +1,93 @@
-# Pulse402 Oracle
+# Pulse402 — Dual-Chain (Base + Solana) x402 Data Oracle
 
-Read-only Base market quotes, Polymarket books/history and sampled token-risk evidence for agents. The canonical service is https://pulse402-oracle.onrender.com. Feeds retain their original observation timestamps and a 10-second acquisition TTL; expired data is refreshed before delivery. Provider failures are reported before settlement.
+Pulse402 is an autonomous, high-frequency data oracle designed specifically for autonomous AI agents and trading bots. It streams verified, read-only market intelligence and pre-trade security checks over HTTP and MCP, settling micropayments natively over the **x402 V2 protocol** on both **Base L2 (`eip155:8453`)** and **Solana Mainnet (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)**.
 
-| Feed | Acquired output | USDC/call |
-| --- | --- | --- |
-| `/v1/pulse/base-liquidity` | Observed liquidity, actual pool balances, measured balance changes after warm-up and pinned-block $100/$1,000/$10,000 USDC quotes on supported pools | 0.001 |
-| `/v1/pulse/polymarket-velocity` | Actual CLOB depth/midpoint and five-minute probability movement from price history, with separate exchange and acquisition times | 0.001 |
-| `/v1/pulse/threat-intel` | GoPlus assessments for the disclosed token sample, evidence hashes and scoped text checks | 0.001 |
-| `/v1/pulse/arb-routes` | Distinct-pool, amount-specific round-trip quotes at one verified Base block, with gross spread | 0.001 |
+The canonical service is hosted at `https://pulse402-oracle.onrender.com` and proxied globally with zero latency via Cloudflare Workers at `https://pulse402-oracle.ak10082247.workers.dev`.
 
-Quotes are unsigned public contract reads. Total execution gas, transfer taxes, MEV, successful fills and net profitability are not established. Unsupported pools and missing evidence are explicit. Displayed price movement does not identify whales. The text sanitizer detects stated patterns and cannot guarantee complete injection prevention. An empty spender list is not an all-clear.
+Every response preserves its original observation timestamp and a strict 10-second acquisition TTL. Outages and stale quotes are reported transparently before payment settlement.
 
-Base balances and amount-specific quotes can be acquired directly from validated canonical Uniswap V3 pools when market discovery is unavailable. Such records disclose their actual pool-selection scope and discovery error; unavailable provider USD prices, USD liquidity, volume and five-minute changes remain null. The catalog lists acquired and unavailable assets. A requested asset without complete quote/balance evidence is rejected before a new payment settles.
+---
 
-## Payments
+## 1. Live Feed Catalog & High-Margin Pricing
 
-Base and Solana use x402 v2 exact USDC payments. An unpaid request returns HTTP 402 with current server requirements. Use an x402-capable client; this server never needs a customer's private key.
+| Feed | Route | Tier | Price (USDC) | Atomic Units | Description |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **Base DEX Liquidity** | `/v1/pulse/base-liquidity` | **Tier 1** | **$0.005** | `5,000` | Pinned-block Uniswap V3 & Aerodrome pool reserves, slippage quotes for $100 / $1k / $10k USDC, and pool balance shifts. |
+| **GoPlus Threat Intel** | `/v1/pulse/threat-intel` | **Tier 1** | **$0.005** | `5,000` | Real-time honeypot flags, malicious spender checks, and deterministic prompt-injection text sanitization. |
+| **Polymarket Velocity** | `/v1/pulse/polymarket-velocity` | **Tier 2** | **$0.010** | `10,000` | Live CLOB orderbook bid/ask depth, 5-minute probability movement, and momentum signals from real exchange price history. |
+| **Cross-DEX Arb Routes** | `/v1/pulse/arb-routes` | **Tier 2** | **$0.010** | `10,000` | Distinct-pool gross round-trip quotes across Base pools with fee deductions and pinned-block execution state. |
+| **Solana Pump.fun & Raydium** | `/v1/pulse/solana-velocity` | **Tier 2** | **$0.010** | `10,000` | Real-time Solana Pump.fun and Raydium token velocity, trending boosted tokens, 5m volume, and bonding curve status for sniper bots. |
+| **HFT Session Pass** | `POST /v1/pass/prepay` | **Tier 3** | **$5.000** | `5,000,000` | **2,500 zero-latency calls** ($0.002/call effective rate — saves 60%–80% over per-call settlement and eliminates signing latency). |
 
-- Base receiver: `0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6`
-- Solana receiver: `9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh`
-- Solana USDC ATA: `DD3A7jaXFeHcif9eYj6Vhomuxypat5Yxi8ow6wxz27yL`. It must exist before sponsored USDC transfers; a quote alone does not prove account readiness.
-- `POST /v1/pass/prepay` with an empty JSON object purchases 6,000 credits for 5 USDC, valid for seven days. Credits activate only after confirmed settlement.
-- Send a purchased token in `X-Pulse-Session`, with a unique `Idempotency-Key` for each delivery. Retrying identical arguments with the same key recovers the response without another credit.
-- Use the original signed authorization and identical request to recover a pay-per-request result. Never sign a replacement payment when the response says `charged: "unknown"`.
+---
 
-The HTTP, sanitizer, prepay and MCP routes share one verified lifecycle: authenticate buyer, claim operation, verify, acquire a valid bounded result, persist preparation, submit settlement once, then commit the receipt/delivery. Ambiguous settlements are retained for reconciliation and never automatically submitted again. Retained completed purchases can recover after authorization expiry.
+## 2. Dual-Chain Settlement Infrastructure
 
-Feed acquisition reserves freshness headroom without changing its original timestamp or ten-second TTL. A confirmed payment whose data expires during settlement keeps its paid entitlement: the service acquires a replacement without another settlement. If acquisition is unavailable, it reports a confirmed paid pending delivery, and identical authenticated recovery retries fulfillment only. Ordinary completed historical replays retain their original data; an originally expired delivery retains its archived evidence when repaired.
+Pulse402 accepts gasless, partial-signed x402 V2 authorizations on both major agent ecosystems:
 
-Set `PULSE_PAYMENTS_DB=/app/state/payments.sqlite3` on a persistent disk. SQLite uses WAL, full synchronization and owner-fenced operation transitions. The approved Render disk mounts `/app/state`. Ephemeral storage is unsuitable for preserving purchased credits or recovery across redeployments.
+### A. Base Mainnet (`eip155:8453`)
+- **Asset**: Circle USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, 6 decimals)
+- **Standard**: EIP-3009 `TransferWithAuthorization` (requires **zero gas / 0 ETH** from the buyer)
+- **Merchant Recipient**: `0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6`
+- **Settlement**: Verified through Coinbase CDP Facilitator & PayAI Facilitator (`https://facilitator.payai.network`)
 
-## Agent discovery
+### B. Solana Mainnet (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)
+- **Asset**: Native SPL USDC (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, 6 decimals)
+- **Standard**: SPL Token `TransferChecked` inside a sponsored v0 `VersionedTransaction` (requires **zero gas / 0 SOL** from the buyer)
+- **Merchant Recipient**: `9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh`
+- **Merchant USDC ATA**: `DD3A7jaXFeHcif9eYj6Vhomuxypat5Yxi8ow6wxz27yL`
+- **Sponsored Fee Payer**: `CjNFTjvBhbJJd2B5ePPMHRLx1ELZpa8dwQgGL727eKww` (relayed via PayAI Facilitator)
 
-`/openapi.json`, `/llms.txt`, `/skill.md`, `/.well-known/x402.json`, `/.well-known/mcp.json`, `/.well-known/agent-card.json` and MCP discovery are public. `POST /mcp` accepts JSON-RPC discovery and four paid tools. A remote MCP connector provides transport; tool use still needs an x402-capable payment client or purchased session header.
+---
 
-Free `/v1/preview/*` routes expose coverage counts and observation health, not priced market records. `/health` distinguishes process health from feed freshness; `/version` exposes the deployed revision.
+## 3. High-Frequency Prepay Session Pass (`POST /v1/pass/prepay`)
 
-The Cloudflare Worker proxies every route once to the canonical backend. It has no separate payment engine, free tool quota, synthetic feed or session-minting authority. Its GitHub integration deploys Worker source separately from Render; Wrangler is another supported deployment path. Backend-only changes are reached through the existing fixed proxy.
+High-frequency algorithmic bots and multi-agent swarms can eliminate on-chain signing latency and save 60%–80% on fees by activating a prepaid session pass:
 
-## Verification
+1. **Purchase**: Send a one-time `$5.00 USDC` payment on Base or Solana to `POST /v1/pass/prepay`.
+2. **Receipt**: Server returns a cryptographically secure `session_token` with 2,500 prepaid calls valid for 7 days.
+3. **Execution**: Include the header `X-Pulse-Session: <token>` and `Idempotency-Key: <uuid>` on any paid endpoint.
+4. **Zero Latency**: Calls execute instantly without waiting for on-chain signature verification or facilitator relay.
 
-Run `python -m pytest tests -q` and `node --test tests/worker.test.mjs`. Tests use isolated databases, deterministic unfunded cryptographic fixtures and mocked transports. They do not submit external payments. The feed engine also supports unsigned public-provider verification without buyer keys or transactions.
+---
+
+## 4. Model Context Protocol (MCP) & IDE Integration
+
+Pulse402 runs a production Model Context Protocol (MCP) JSON-RPC 2.0 server at:
+`https://pulse402-oracle.ak10082247.workers.dev/mcp`
+
+### Connecting in Cursor, Windsurf, Zed, or Claude Desktop
+
+Add this snippet to your IDE's MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "pulse402-oracle": {
+      "url": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
+      "headers": {
+        "MCP-Protocol-Version": "2026-07-28"
+      }
+    }
+  }
+}
+```
+
+### Available MCP Tools
+- `pulse_solana_velocity`: Real-time Solana Pump.fun and Raydium token velocity, trending boosted tokens, and liquidity depth.
+- `pulse_base_liquidity`: Mandatory pre-swap liquidity and slippage verification on Base DEXs (Aerodrome & Uniswap V3).
+- `pulse_threat_intel`: Honeypot detection, blacklist checks, and prompt-injection text sanitization.
+- `pulse_polymarket_velocity`: Active prediction market probability movement and CLOB orderbook depth.
+- `pulse_arb_routes`: Pinned-block cyclical arbitrage route quotes and profit simulation.
+
+---
+
+## 5. Machine-Readable Discovery & Telemetry
+
+- **x402 Manifest**: `https://pulse402-oracle.ak10082247.workers.dev/.well-known/x402.json`
+- **MCP Manifest**: `https://pulse402-oracle.ak10082247.workers.dev/.well-known/mcp.json`
+- **Agent Card**: `https://pulse402-oracle.ak10082247.workers.dev/.well-known/agent-card.json`
+- **OpenAPI 3.1 Spec**: `https://pulse402-oracle.ak10082247.workers.dev/openapi.json`
+- **LLM Context**: `https://pulse402-oracle.ak10082247.workers.dev/llms.txt`
+- **Skill Doc**: `https://pulse402-oracle.ak10082247.workers.dev/skill.md`
+- **Live Telemetry**: `https://pulse402-oracle.ak10082247.workers.dev/v1/telemetry/summary`

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/mcp-settings.json",
-  "description": "Pulse402 Oracle MCP Client Configurations for Claude Desktop, Cursor, and OpenClaw",
+  "description": "Pulse402 Dual-Chain Oracle MCP Client Configurations for Claude Desktop, Cursor, Windsurf, Zed, and OpenClaw",
   "claude_desktop": {
     "mcpServers": {
       "pulse402-oracle": {
@@ -18,6 +18,23 @@
         "headers": {
           "MCP-Protocol-Version": "2026-07-28"
         }
+      }
+    }
+  },
+  "windsurf": {
+    "mcpServers": {
+      "pulse402-oracle": {
+        "serverUrl": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
+        "headers": {
+          "MCP-Protocol-Version": "2026-07-28"
+        }
+      }
+    }
+  },
+  "zed": {
+    "context_servers": {
+      "pulse402-oracle": {
+        "url": "https://pulse402-oracle.ak10082247.workers.dev/mcp"
       }
     }
   },

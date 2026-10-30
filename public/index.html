@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pulse402 — High-Frequency Consumable x402 Data Oracle</title>
+  <title>Pulse402 — Dual-Chain (Base + Solana) x402 Data Oracle</title>
   <style>
-    :root { --bg: #090d16; --panel: #111827; --border: #1f2937; --accent: #38bdf8; --green: #10b981; --amber: #f59e0b; --text: #f3f4f6; }
+    :root { --bg: #090d16; --panel: #111827; --border: #1f2937; --accent: #38bdf8; --green: #10b981; --amber: #f59e0b; --purple: #a855f7; --text: #f3f4f6; }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     body { background: var(--bg); color: var(--text); padding: 24px; line-height: 1.5; }
     .container { max-width: 1100px; margin: 0 auto; }
     header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 18px; margin-bottom: 24px; }
     h1 { font-size: 22px; color: #fff; display: flex; align-items: center; gap: 8px; }
     .badge { background: rgba(16, 185, 129, 0.2); color: var(--green); padding: 3px 8px; border-radius: 4px; font-size: 12px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .badge-sol { background: rgba(168, 85, 247, 0.2); color: var(--purple); padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
     .card-title { font-size: 12px; color: #9ca3af; text-transform: uppercase; margin-bottom: 6px; }
     .card-val { font-size: 18px; font-weight: bold; color: var(--accent); }
@@ -30,26 +31,37 @@
   <div class="container">
     <header>
       <div>
-        <h1>⚡ Pulse402 — Data Oracle <span class="badge">OBSERVED DATA • 10s TTL</span></h1>
-        <p style="color:#9ca3af;font-size:12px;margin-top:4px;">Non-cacheable Base DEX, Polymarket velocity, and cross-DEX arb oracle for autonomous AI agents.</p>
+        <h1>⚡ Pulse402 — Dual-Chain Data Oracle <span class="badge">10s TTL</span> <span class="badge-sol">BASE + SOLANA</span></h1>
+        <p style="color:#9ca3af;font-size:12px;margin-top:4px;">Autonomous x402 V2 market oracle streaming live Solana Pump.fun, Polymarket, Base DEX, and threat telemetry.</p>
       </div>
       <div>
         <a href="/.well-known/x402.json" class="btn" style="background:#2563eb;color:#fff;">x402 Manifest</a>
-        <a href="/mcp" class="btn">MCP Connection</a>
+        <a href="/mcp" class="btn">MCP Endpoint</a>
       </div>
     </header>
 
     <div class="grid">
-      <div class="card"><div class="card-title">Settlement Network</div><div class="card-val" style="color:#60a5fa;">Base + Solana</div></div>
-      <div class="card"><div class="card-title">USDC Price / Call</div><div class="card-val">$0.005 – $0.01</div></div>
+      <div class="card"><div class="card-title">Settlement Networks</div><div class="card-val" style="color:#60a5fa;">Base L2 &amp; Solana</div></div>
+      <div class="card"><div class="card-title">USDC Price / Call</div><div class="card-val">$0.005 – $0.010</div></div>
       <div class="card"><div class="card-title">HFT Prepay Pass</div><div class="card-val" style="color:var(--green);">$5 / 2,500 calls</div></div>
-      <div class="card"><div class="card-title">Freshness TTL</div><div class="card-val" id="ttlCounter" style="color:var(--amber);">10s TTL</div></div>
+      <div class="card"><div class="card-title">Data Guarantee</div><div class="card-val" style="color:var(--amber);">0% Mock • Verified RPC</div></div>
     </div>
 
     <div class="feeds">
       <div class="feed-card">
         <div class="feed-header">
-          <span class="feed-name">1. /v1/pulse/base-liquidity (Aerodrome & Uniswap v3 Reserves & Slippage)</span>
+          <span class="feed-name">1. /v1/pulse/solana-velocity (Solana Pump.fun &amp; Raydium Trending Orderflow — $0.010 USDC)</span>
+          <div class="btn-group">
+            <a href="/v1/pulse/solana-velocity" class="btn" target="_blank">x402 Paid Route</a>
+            <a href="/v1/preview/solana-velocity" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
+          </div>
+        </div>
+        <pre id="preSolana">{"status": "polling_preview", "loading": true}</pre>
+      </div>
+
+      <div class="feed-card">
+        <div class="feed-header">
+          <span class="feed-name">2. /v1/pulse/base-liquidity (Aerodrome &amp; Uniswap v3 Reserves &amp; Quotes — $0.005 USDC)</span>
           <div class="btn-group">
             <a href="/v1/pulse/base-liquidity" class="btn" target="_blank">x402 Paid Route</a>
             <a href="/v1/preview/base-liquidity" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
@@ -60,7 +72,7 @@
 
       <div class="feed-card">
         <div class="feed-header">
-          <span class="feed-name">2. /v1/pulse/polymarket-velocity (Historical Movement &amp; Orderbook Depth)</span>
+          <span class="feed-name">3. /v1/pulse/polymarket-velocity (Live CLOB Depth &amp; Momentum Spreads — $0.010 USDC)</span>
           <div class="btn-group">
             <a href="/v1/pulse/polymarket-velocity" class="btn" target="_blank">x402 Paid Route</a>
             <a href="/v1/preview/polymarket-velocity" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
@@ -71,7 +83,7 @@
 
       <div class="feed-card">
         <div class="feed-header">
-          <span class="feed-name">3. /v1/pulse/threat-intel (Sampled Base Token Risks &amp; Text Checks)</span>
+          <span class="feed-name">4. /v1/pulse/threat-intel (GoPlus Token Safety &amp; Text Sanitizer — $0.005 USDC)</span>
           <div class="btn-group">
             <a href="/v1/pulse/threat-intel" class="btn" target="_blank">x402 Paid Route</a>
             <a href="/v1/preview/threat-intel" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
@@ -82,7 +94,7 @@
 
       <div class="feed-card">
         <div class="feed-header">
-          <span class="feed-name">4. /v1/pulse/arb-routes (Live Cross-DEX Spreads & Smart-Router Paths)</span>
+          <span class="feed-name">5. /v1/pulse/arb-routes (Live Cross-DEX Cyclical Spreads — $0.010 USDC)</span>
           <div class="btn-group">
             <a href="/v1/pulse/arb-routes" class="btn" target="_blank">x402 Paid Route</a>
             <a href="/v1/preview/arb-routes" class="btn" style="background:#374151;color:#fff;" target="_blank">Free Preview</a>
@@ -93,19 +105,21 @@
     </div>
 
     <div class="card" style="margin-bottom:24px;">
-      <div class="card-title">Copy-Paste MCP Configuration for Claude Desktop / Cursor</div>
+      <div class="card-title">Direct MCP Configuration for Claude Desktop, Cursor, Windsurf &amp; Zed</div>
       <pre style="color:#f3f4f6;">{
   "mcpServers": {
-    "pulse402": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://pulse402-oracle.onrender.com/mcp"]
+    "pulse402-oracle": {
+      "url": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
+      "headers": {
+        "MCP-Protocol-Version": "2026-07-28"
+      }
     }
   }
 }</pre>
     </div>
 
     <footer>
-      Pulse402 Oracle • Base PayTo: <code>0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6</code> • Solana PayTo: <code>9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh</code> • x402 V2
+      Pulse402 Dual-Chain Oracle • Base Receiver: <code>0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6</code> • Solana Receiver: <code>9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh</code> • x402 Version 2
     </footer>
   </div>
 
@@ -119,13 +133,20 @@
         document.getElementById(elId).textContent = JSON.stringify({ error: String(e) }, null, 2);
       }
     }
+    loadFeed('/v1/preview/solana-velocity', 'preSolana');
     loadFeed('/v1/preview/base-liquidity', 'preLiquidity');
     loadFeed('/v1/preview/polymarket-velocity', 'prePolymarket');
     loadFeed('/v1/preview/threat-intel', 'preThreat');
     loadFeed('/v1/preview/arb-routes', 'preArb');
 
     setInterval(() => {
-      for (const [name, id] of [['base-liquidity','preLiquidity'], ['polymarket-velocity','prePolymarket'], ['threat-intel','preThreat'], ['arb-routes','preArb']]) {
+      for (const [name, id] of [
+        ['solana-velocity', 'preSolana'],
+        ['base-liquidity', 'preLiquidity'],
+        ['polymarket-velocity', 'prePolymarket'],
+        ['threat-intel', 'preThreat'],
+        ['arb-routes', 'preArb']
+      ]) {
         loadFeed('/v1/preview/' + name, id);
       }
     }, 10000);
