@@ -369,7 +369,7 @@
             "x402PaymentSignature": []
           }
         ],
-        "description": "Pay 5 USDC on Base or Solana to activate 6,000 credits for seven days. No credits are minted before confirmed settlement.",
+        "description": "Pay 5 USDC on Base or Solana to activate 2,500 credits for seven days (effective $0.002/call, 60%-80% savings). No credits are minted before confirmed settlement.",
         "requestBody": {
           "content": {
             "application/json": {

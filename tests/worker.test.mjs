@@ -32,6 +32,20 @@ test('every paid HTTP/sanitize/prepay/MCP entry delegates forged or absent autho
   assert.equal(calls.length,paths.length*2);
 });
 
+test('underpaid signatures are rejected at edge with 402 insufficient_payment_amount before upstream', async () => {
+  let calls = 0;
+  const gateway = createGateway(async () => { calls++; return new Response('{"status":"ok"}', { status: 200 }); });
+  const underpaidSig = Buffer.from(JSON.stringify({
+    payload: { authorization: { value: '1000' } },
+    accepted: { amount: '1000' }
+  })).toString('base64');
+  const res = await gateway(make('/v1/pulse/base-liquidity', 'GET', { 'PAYMENT-SIGNATURE': underpaidSig }));
+  assert.equal(res.status, 402);
+  const json = await res.json();
+  assert.equal(json.error, 'insufficient_payment_amount');
+  assert.equal(calls, 0); // never forwarded to upstream
+});
+
 test('MCP first-call/free-quota and invented session bypasses cannot create a local success',async()=>{
   let calls=0;
   const gateway=createGateway(async()=>{calls++;return new Response('{"error":"INVALID_SESSION"}',{status:402});});

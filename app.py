@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 import httpx
 
 from engine.poller import start_poller_loop, get_feed_state, get_feed_diagnostics, STATE, is_paced_feed_healthy, BACKGROUND_MIN_INTERVAL_SECONDS
+from engine import telemetry
 from engine.provider_reads import provider_diagnostics
 from engine.threat_intel import sanitize_untrusted_text
 from engine import payments
@@ -39,8 +40,37 @@ SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 SOLANA_PAYOUT_WALLET = payments.requirements()[1]["payTo"]
 SOLANA_FEE_PAYER = "CjNFTjvBhbJJd2B5ePPMHRLx1ELZpa8dwQgGL727eKww"
 
-PRICE_PER_CALL_USDC = "0.001"
-PRICE_PER_CALL_MICRO = "1000"  # 1,000 micro-units = 0.001 USDC
+TIER1_PRICE_USDC = "0.005"
+TIER1_AMOUNT_MICRO = "5000"   # 5,000 micro-units = 0.005 USDC
+TIER2_PRICE_USDC = "0.01"
+TIER2_AMOUNT_MICRO = "10000"  # 10,000 micro-units = 0.01 USDC
+PREPAY_PRICE_USDC = "5.000"
+PREPAY_AMOUNT_MICRO = "5000000"
+PREPAY_CALLS = 2500
+
+FEED_AMOUNTS = {
+    "base-liquidity": TIER1_AMOUNT_MICRO,
+    "threat-intel": TIER1_AMOUNT_MICRO,
+    "polymarket-velocity": TIER2_AMOUNT_MICRO,
+    "arb-routes": TIER2_AMOUNT_MICRO,
+}
+
+FEED_PRICES = {
+    "base-liquidity": TIER1_PRICE_USDC,
+    "threat-intel": TIER1_PRICE_USDC,
+    "polymarket-velocity": TIER2_PRICE_USDC,
+    "arb-routes": TIER2_PRICE_USDC,
+}
+
+TOOL_AMOUNTS = {
+    "pulse_base_liquidity": TIER1_AMOUNT_MICRO,
+    "pulse_threat_intel": TIER1_AMOUNT_MICRO,
+    "pulse_polymarket_velocity": TIER2_AMOUNT_MICRO,
+    "pulse_arb_routes": TIER2_AMOUNT_MICRO,
+}
+
+PRICE_PER_CALL_USDC = TIER1_PRICE_USDC
+PRICE_PER_CALL_MICRO = TIER1_AMOUNT_MICRO
 
 # SSRF blocked targets
 SSRF_BLOCKED_HOSTS = {
@@ -205,10 +235,25 @@ BAZAAR_METADATA = {'/v1/pulse/base-liquidity': {'description': 'Base token liqui
                                                         'ttl_seconds',
                                                         'data']}}}
 
-def build_bazaar_402_challenge(path, request_url=None, amount="1000"):
+def build_bazaar_402_challenge(path, request_url=None, amount="5000"):
+    telemetry.record_challenge(path)
     description = BAZAAR_METADATA.get(path, {}).get("description", "Pulse402 paid oracle delivery")
     body = payments.challenge(path, amount, description)
-    body.update(error="payment_required", status=402, price_usdc=str(int(amount) / 1_000_000))
+    price_val = "0.005" if str(amount) == "5000" else "0.01" if str(amount) == "10000" else "5.00" if str(amount) == "5000000" else str(int(amount) / 1_000_000)
+    body.update(
+        error="payment_required",
+        status=402,
+        price_usdc=price_val,
+        required_atomic_units=int(amount),
+        hft_session_pass={
+            "path": "/v1/pass/prepay",
+            "price_usd": "5.00",
+            "calls": 2500,
+            "effective_rate_usd": "0.002",
+            "savings": "60%-80% discount over per-call settlement",
+            "benefit": "Eliminates on-chain signing latency for high-frequency bots (2,500 zero-latency calls for 7 days)",
+        },
+    )
     # Keep the complete metadata in the JSON body, rather than repeating a large
     # Base64 payload across several response headers.
     if path in BAZAAR_METADATA:
@@ -235,6 +280,13 @@ app = FastAPI(
     version=SERVICE_VERSION,
     lifespan=lifespan
 )
+
+@app.middleware("http")
+async def record_user_agent_middleware(request: Request, call_next):
+    ua = request.headers.get("user-agent")
+    if ua:
+        telemetry.record_user_agent(ua)
+    return await call_next(request)
 
 def custom_openapi():
     if app.openapi_schema:
@@ -263,7 +315,7 @@ def custom_openapi():
         operation["responses"].update({"402": {"description": "Verified x402 payment or purchased credit required."}, "503": {"description": "Fresh fulfillment unavailable or settlement requires recovery; inspect charged field before retrying."}})
     prepay = openapi_schema["paths"]["/v1/pass/prepay"]["post"]
     prepay["security"] = [{"x402PaymentSignature": []}]
-    prepay["description"] = "Pay 5 USDC on Base or Solana to activate 6,000 credits for seven days. No credits are minted before confirmed settlement."
+    prepay["description"] = "Pay 5 USDC on Base or Solana to activate 2,500 credits for seven days (effective $0.002/call, 60%-80% savings). No credits are minted before confirmed settlement."
     prepay["requestBody"] = {"content": {"application/json": {"schema": {"type": "object", "additionalProperties": False}}}}
     app.openapi_schema = openapi_schema
     return app.openapi_schema
@@ -368,7 +420,7 @@ async def acquire_feed(feed_name, arguments):
     return result
 
 
-async def paid_delivery(request, path, arguments, acquire, *, metadata=None, amount="1000", prepay=False, delivery_valid=None):
+async def paid_delivery(request, path, arguments, acquire, *, metadata=None, amount="5000", prepay=False, delivery_valid=None):
     raw = payments.payment_header(request.headers, metadata)
     session = request.headers.get("X-Pulse-Session")
     headers = {"Cache-Control": "no-store, max-age=0", "X-Pulse-Oracle": "Pulse402"}
@@ -391,7 +443,8 @@ async def handle_feed_response(request, feed_name, path):
             raise payments.PaymentError("DUPLICATE_QUERY_ARGUMENT", 400)
         name = feed_name.replace("_", "-")
         args = feed_arguments(name, dict(request.query_params), query=True)
-        data, headers, challenge = await paid_delivery(request, path, args, lambda: acquire_feed(name, args), delivery_valid=feed_delivery_valid)
+        amount = FEED_AMOUNTS.get(name, TIER1_AMOUNT_MICRO)
+        data, headers, challenge = await paid_delivery(request, path, args, lambda: acquire_feed(name, args), amount=amount, delivery_valid=feed_delivery_valid)
         return challenge if challenge is not None else JSONResponse(content=data, headers=headers)
     except payments.PaymentError as error:
         return payment_failure(error)
@@ -523,11 +576,11 @@ async def terms_page():
         "<p>Pulse402 provides machine-readable market and risk observations on an as-is basis, without warranty. "
         "Data comes from public on-chain reads and third-party providers and may be incomplete, delayed or wrong. "
         "Nothing returned is financial, investment or security advice, and a missing risk flag is not an all-clear.</p>"
-        f"<p>Each paid call costs ${PRICE_PER_CALL_USDC} USDC and is charged only after the requested data has been "
+        f"<p>Paid calls cost $0.005 (Tier 1: liquidity & security) or $0.01 (Tier 2: alpha & arb) and are charged only after requested data has been "
         "acquired and validated for delivery. Settled on-chain payments cannot be reversed by the service. If a response reports "
         "<code>charged=unknown</code>, retry with the same payment authorization or idempotency key to recover the delivery; "
         "do not sign a replacement payment.</p>"
-        "<p>Prepaid sessions ($5 USDC for 6,000 calls, valid for seven days) activate only after verified settlement. "
+        "<p>Prepaid sessions ($5.00 USDC for 2,500 calls, valid for seven days, $0.002/call effective rate) activate only after verified settlement. "
         "Abuse, attempts to bypass payment, or attacks on the service may be blocked.</p>"
     ))
 
@@ -557,16 +610,18 @@ async def x402_manifest(request: Request):
             "network": BASE_NETWORK,
             "payTo": PAYOUT_WALLET_ADDRESS,
             "asset": BASE_USDC,
-            "standard_call_usd": PRICE_PER_CALL_USDC,
-            "prepay_session_usd": "5.000",
-            "prepay_session_calls": 6000
+            "tier1_safety_usd": TIER1_PRICE_USDC,
+            "tier2_alpha_usd": TIER2_PRICE_USDC,
+            "prepay_session_usd": PREPAY_PRICE_USDC,
+            "prepay_session_calls": PREPAY_CALLS,
+            "prepay_savings": "60%-80% ($0.002/call effective)"
         },
-        "payment_networks": payments.requirements(),
+        "payment_networks": payments.requirements(TIER1_AMOUNT_MICRO),
         "endpoints": [
-            {"path": "/v1/pulse/base-liquidity", "method": "GET", "price": PRICE_PER_CALL_USDC, "description": "Base liquidity, pool balance changes and amount-specific quotes"},
-            {"path": "/v1/pulse/polymarket-velocity", "method": "GET", "price": PRICE_PER_CALL_USDC, "description": "Live Polymarket probability velocity & orderbook spread imbalances"},
-            {"path": "/v1/pulse/threat-intel", "method": "GET", "price": PRICE_PER_CALL_USDC, "description": "Sampled provider token-risk evidence and scoped text sanitization"},
-            {"path": "/v1/pulse/arb-routes", "method": "GET", "price": PRICE_PER_CALL_USDC, "description": "Pinned-block distinct-pool gross round-trip quotes"}
+            {"path": "/v1/pulse/base-liquidity", "method": "GET", "price": TIER1_PRICE_USDC, "amount_atomic": TIER1_AMOUNT_MICRO, "tier": 1, "description": "Base liquidity, pool balance changes and amount-specific quotes"},
+            {"path": "/v1/pulse/threat-intel", "method": "GET", "price": TIER1_PRICE_USDC, "amount_atomic": TIER1_AMOUNT_MICRO, "tier": 1, "description": "Sampled provider token-risk evidence and scoped text sanitization"},
+            {"path": "/v1/pulse/polymarket-velocity", "method": "GET", "price": TIER2_PRICE_USDC, "amount_atomic": TIER2_AMOUNT_MICRO, "tier": 2, "description": "Live Polymarket probability velocity & orderbook spread imbalances"},
+            {"path": "/v1/pulse/arb-routes", "method": "GET", "price": TIER2_PRICE_USDC, "amount_atomic": TIER2_AMOUNT_MICRO, "tier": 2, "description": "Pinned-block distinct-pool gross round-trip quotes"}
         ]
     }
 
@@ -605,10 +660,11 @@ Pulse402 acquires read-only provider evidence in bounded background cycles and r
 - POST {base_url}/mcp : Model Context Protocol JSON-RPC 2.0 HTTP endpoint; discovery is free and tool execution requires payment.
 
 ## Pricing & x402 Micropayments
-- Standard Price: $0.001 USDC per call on Base ({BASE_NETWORK}) or Solana ({SOLANA_NETWORK}).
+- Tier 1 Feeds ($0.005 USDC / 5,000 atomic units): /v1/pulse/base-liquidity, /v1/pulse/threat-intel on Base ({BASE_NETWORK}) or Solana ({SOLANA_NETWORK}).
+- Tier 2 Feeds ($0.01 USDC / 10,000 atomic units): /v1/pulse/polymarket-velocity, /v1/pulse/arb-routes on Base or Solana.
 - Payout Wallet: {PAYOUT_WALLET_ADDRESS}
 - Solana Payout Wallet: {SOLANA_PAYOUT_WALLET}
-- Prepay Session: POST {base_url}/v1/pass/prepay ($5 USDC for 6,000 calls valid for seven days, activated only after verified settlement).
+- HFT Prepay Session: POST {base_url}/v1/pass/prepay ($5.00 USDC for 2,500 zero-latency calls, $0.002/call effective rate — saves 60%-80% over per-call settlement and eliminates signing latency).
 - Free previews expose coverage summaries only. MCP discovery is free; tool execution uses the same payment flow as HTTP.
 - Purchased sessions use X-Pulse-Session and a unique Idempotency-Key per call. Reuse the same key and arguments to recover a response without another credit.
 - Retain the original payment authorization for recovery. A charged=unknown response requires reconciliation; do not sign a replacement payment.
@@ -625,10 +681,10 @@ Pulse402 (`pulse402-oracle`) is a high-frequency, consumable x402 data oracle en
 
 | Feed | Paid Path ($0.001 USDC) | Free Preview Path | Description |
 | :--- | :--- | :--- | :--- |
-| **Base Liquidity** | `/v1/pulse/base-liquidity` | `/v1/preview/base-liquidity` | Observed liquidity and balance changes; actual amount-specific pinned-block quotes on supported pools |
-| **Polymarket Velocity** | `/v1/pulse/polymarket-velocity` | `/v1/preview/polymarket-velocity` | Historical five-minute probability movement and acquired CLOB depth; no whale identity assertion |
-| **Threat Intel** | `/v1/pulse/threat-intel` | `/v1/preview/threat-intel` | Sampled provider token-risk evidence and scoped text sanitization |
-| **Arbitrage Routes** | `/v1/pulse/arb-routes` | `/v1/preview/arb-routes` | Distinct-pool round-trip quote amounts and gross spread; unknown net execution costs |
+| **Base Liquidity (Tier 1)** | `/v1/pulse/base-liquidity` ($0.005) | `/v1/preview/base-liquidity` | Observed liquidity and balance changes; actual amount-specific pinned-block quotes on supported pools |
+| **Threat Intel (Tier 1)** | `/v1/pulse/threat-intel` ($0.005) | `/v1/preview/threat-intel` | Sampled provider token-risk evidence and scoped text sanitization |
+| **Polymarket Velocity (Tier 2)** | `/v1/pulse/polymarket-velocity` ($0.01) | `/v1/preview/polymarket-velocity` | Historical five-minute probability movement and acquired CLOB depth; no whale identity assertion |
+| **Arbitrage Routes (Tier 2)** | `/v1/pulse/arb-routes` ($0.01) | `/v1/preview/arb-routes` | Distinct-pool round-trip quote amounts and gross spread; unknown net execution costs |
 
 ## Connection Options
 
@@ -648,11 +704,17 @@ Agents can inspect free coverage and acquisition-health summaries without paymen
 curl -s {base_url}/v1/preview/base-liquidity
 ```
 
-### 3. Paid x402 V2 Toll Settlement ($0.001 USDC)
+### 3. Paid x402 V2 Toll Settlement ($0.005 – $0.01 USDC)
 Querying any `/v1/pulse/*` route without authorization returns `HTTP 402 Payment Required` with payment instructions in the `PAYMENT-REQUIRED` header:
-- **Base Mainnet (`eip155:8453`)**: Sign an EIP-712 `TransferWithAuthorization` (EIP-3009) to Merchant `{PAYOUT_WALLET_ADDRESS}` for `1000` micro-USDC ($0.001 USDC) on asset `{BASE_USDC}`.
-- **Solana Mainnet (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)**: Partially sign a v0 `VersionedTransaction` with SPL `TransferChecked` for `1000` micro-USDC to ATA `DD3A7jaXFeHcif9eYj6Vhomuxypat5Yxi8ow6wxz27yL` (Merchant `{SOLANA_PAYOUT_WALLET}`), sponsored by feePayer `{SOLANA_FEE_PAYER}`.
+- **Tier 1 ($0.005 USDC / 5,000 atomic units)**: `/v1/pulse/base-liquidity`, `/v1/pulse/threat-intel`
+- **Tier 2 ($0.01 USDC / 10,000 atomic units)**: `/v1/pulse/polymarket-velocity`, `/v1/pulse/arb-routes`
+- **Base Mainnet (`eip155:8453`)**: Sign an EIP-712 `TransferWithAuthorization` (EIP-3009) to Merchant `{PAYOUT_WALLET_ADDRESS}` for required atomic units on asset `{BASE_USDC}`.
+- **Solana Mainnet (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)**: Partially sign a v0 `VersionedTransaction` with SPL `TransferChecked` for required atomic units to ATA `DD3A7jaXFeHcif9eYj6Vhomuxypat5Yxi8ow6wxz27yL` (Merchant `{SOLANA_PAYOUT_WALLET}`), sponsored by feePayer `{SOLANA_FEE_PAYER}`.
 - Send the Base64 JSON payload in `PAYMENT-SIGNATURE` or `X-PAYMENT` header.
+
+### 4. High-Frequency Session Pass (POST /v1/pass/prepay)
+- **Price**: $5.00 USDC (5,000,000 atomic units) for **2,500 zero-latency calls** ($0.002/call effective rate).
+- **Advantage**: Saves high-frequency bots **60%–80%** over per-call settlement and eliminates on-chain signing latency.
 """
     return PlainTextResponse(skill_content, media_type="text/markdown; charset=utf-8")
 
@@ -696,10 +758,10 @@ async def get_agent_card(request: Request):
             }
         },
         "endpoints": [
-            {"path": "/v1/pulse/base-liquidity", "method": "GET", "price": "$0.001 USDC", "description": "Base DEX liquidity, reserves, and slippage quotes"},
-            {"path": "/v1/pulse/polymarket-velocity", "method": "GET", "price": "$0.001 USDC", "description": "Acquired Polymarket history and orderbook depth"},
-            {"path": "/v1/pulse/threat-intel", "method": "GET", "price": "$0.001 USDC", "description": "Sampled provider token risks and scoped text sanitization"},
-            {"path": "/v1/pulse/arb-routes", "method": "GET", "price": "$0.001 USDC", "description": "Cross-DEX arbitrage routes and profitability simulation"},
+            {"path": "/v1/pulse/base-liquidity", "method": "GET", "price": "$0.005 USDC", "description": "Base DEX liquidity, reserves, and slippage quotes (Tier 1)"},
+            {"path": "/v1/pulse/polymarket-velocity", "method": "GET", "price": "$0.01 USDC", "description": "Acquired Polymarket history and orderbook depth (Tier 2)"},
+            {"path": "/v1/pulse/threat-intel", "method": "GET", "price": "$0.005 USDC", "description": "Sampled provider token risks and scoped text sanitization (Tier 1)"},
+            {"path": "/v1/pulse/arb-routes", "method": "GET", "price": "$0.01 USDC", "description": "Cross-DEX arbitrage routes and profitability simulation (Tier 2)"},
             {"path": "/v1/preview/base-liquidity", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of Base DEX liquidity"},
             {"path": "/v1/preview/polymarket-velocity", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of Polymarket velocity"},
             {"path": "/v1/preview/threat-intel", "method": "GET", "price": "Free", "description": "Unauthenticated coverage summary of threat intel"},
@@ -713,19 +775,27 @@ async def get_agent_card(request: Request):
 
 @app.get("/v1/preview/base-liquidity")
 async def preview_base_liquidity():
+    telemetry.record_preview()
     return JSONResponse(preview_payload("base-liquidity"), headers={"Cache-Control": "no-store"})
 
 @app.get("/v1/preview/polymarket-velocity")
 async def preview_polymarket_velocity():
+    telemetry.record_preview()
     return JSONResponse(preview_payload("polymarket-velocity"), headers={"Cache-Control": "no-store"})
 
 @app.get("/v1/preview/threat-intel")
 async def preview_threat_intel():
+    telemetry.record_preview()
     return JSONResponse(preview_payload("threat-intel"), headers={"Cache-Control": "no-store"})
 
 @app.get("/v1/preview/arb-routes")
 async def preview_arb_routes():
+    telemetry.record_preview()
     return JSONResponse(preview_payload("arb-routes"), headers={"Cache-Control": "no-store"})
+
+@app.get("/v1/telemetry/summary")
+async def get_telemetry_summary():
+    return JSONResponse(telemetry.get_summary(), headers={"Cache-Control": "no-store"})
 
 # ==============================================================================
 # HIGH-FREQUENCY PAID CONSUMABLE FEEDS (Strict x402 with Bazaar Metadata)
@@ -751,7 +821,7 @@ async def post_threat_sanitize(request: Request):
             raise payments.PaymentError("INVALID_SANITIZER_INPUT", 400)
         async def acquire():
             return {"status": "ok", "timestamp_ms": int(time.time() * 1000), "sanitization": sanitize_untrusted_text(body["content"], strict_mode=body.get("strict_mode", True))}
-        data, headers, challenge = await paid_delivery(request, "/v1/pulse/threat-intel/sanitize", body, acquire)
+        data, headers, challenge = await paid_delivery(request, "/v1/pulse/threat-intel/sanitize", body, acquire, amount=TIER1_AMOUNT_MICRO)
         return challenge if challenge is not None else JSONResponse(data, headers=headers)
     except payments.PaymentError as error:
         return payment_failure(error)
@@ -858,9 +928,14 @@ async def mcp_rpc(request: Request):
         req_id, method, params = body.get("id"), body.get("method"), body.get("params", {})
         if body.get("jsonrpc") != "2.0" or not isinstance(params, dict):
             raise payments.PaymentError("INVALID_JSON_RPC", 400)
+        proto_hdr = request.headers.get("MCP-Protocol-Version")
         if method == "initialize":
-            requested = params.get("protocolVersion")
-            result = {"protocolVersion": requested if requested in ("2024-11-05", "2025-03-26", "2025-06-18") else "2025-06-18", "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": SERVICE_NAME, "version": SERVICE_VERSION}}
+            requested = proto_hdr or params.get("protocolVersion")
+            supported = ("2024-11-05", "2025-03-26", "2025-06-18", "2026-07-28")
+            chosen = requested if requested in supported else "2026-07-28"
+            result = {"protocolVersion": chosen, "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": SERVICE_NAME, "version": SERVICE_VERSION}}
+            resp_headers = {"MCP-Protocol-Version": chosen} if proto_hdr else {}
+            return JSONResponse({"jsonrpc": "2.0", "id": req_id, "result": result}, headers=resp_headers)
         elif method == "tools/list":
             result = {"tools": MCP_TOOLS}
         elif method in ("ping", "notifications/initialized"):
@@ -873,9 +948,11 @@ async def mcp_rpc(request: Request):
             name = params.get("name")
             if not isinstance(name, str) or name not in FEED_TOOL_MAP:
                 return JSONResponse({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Unknown tool"}}, status_code=404)
+            telemetry.record_mcp_tool_call()
             args = feed_arguments(FEED_TOOL_MAP[name], params.get("arguments", {}))
             bound = {"tool": name, "arguments": args}
-            data, headers, challenge = await paid_delivery(request, "/mcp", bound, lambda: acquire_feed(FEED_TOOL_MAP[name], args), metadata=params.get("_meta"), delivery_valid=feed_delivery_valid)
+            tool_amount = TOOL_AMOUNTS.get(name, TIER1_AMOUNT_MICRO)
+            data, headers, challenge = await paid_delivery(request, "/mcp", bound, lambda: acquire_feed(FEED_TOOL_MAP[name], args), metadata=params.get("_meta"), amount=tool_amount, delivery_valid=feed_delivery_valid)
             if challenge is not None:
                 return JSONResponse({"jsonrpc": "2.0", "id": req_id, "result": {"isError": True, "content": [{"type": "text", "text": challenge.body.decode()}], "structuredContent": json.loads(challenge.body)}}, status_code=402, headers=dict(challenge.headers))
             result = {"content": [{"type": "text", "text": json.dumps(data)}], "structuredContent": data, "isError": False}

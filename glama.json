@@ -1,0 +1,15 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "name": "pulse402-oracle",
+  "version": "1.3.0",
+  "description": "High-margin dual-chain (Base & Solana) x402 V2 Oracle streaming Polymarket velocity, Aerodrome/Uniswap liquidity, and pre-trade security feeds.",
+  "maintainers": [
+    "ak10082247-max"
+  ],
+  "url": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
+  "pricing": {
+    "tier1_usd": 0.005,
+    "tier2_usd": 0.010,
+    "session_pass_usd": 5.00
+  }
+}

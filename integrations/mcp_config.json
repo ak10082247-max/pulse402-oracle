@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/mcp-settings.json",
+  "description": "Pulse402 Oracle MCP Client Configurations for Claude Desktop, Cursor, and OpenClaw",
+  "claude_desktop": {
+    "mcpServers": {
+      "pulse402-oracle": {
+        "url": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
+        "headers": {
+          "MCP-Protocol-Version": "2026-07-28"
+        }
+      }
+    }
+  },
+  "cursor": {
+    "mcpServers": {
+      "pulse402-oracle": {
+        "url": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
+        "headers": {
+          "MCP-Protocol-Version": "2026-07-28"
+        }
+      }
+    }
+  },
+  "openclaw": {
+    "plugins": [
+      {
+        "id": "pulse402-oracle",
+        "transport": "http",
+        "endpoint": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
+        "protocolVersion": "2026-07-28",
+        "pricingTiers": {
+          "tier1_micro": 5000,
+          "tier2_micro": 10000,
+          "hft_session_pass_micro": 5000000
+        }
+      }
+    ]
+  }
+}

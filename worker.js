@@ -19,6 +19,32 @@ const EXPOSE_HEADERS = [
 const RESPONSE_STRIP = ['Connection', 'Keep-Alive', 'Proxy-Authenticate', 'Proxy-Authorization',
   'TE', 'Trailer', 'Transfer-Encoding', 'Upgrade', 'Set-Cookie', 'Set-Cookie2'];
 
+const ROUTE_MIN_ATOMIC = {
+  '/v1/pulse/base-liquidity': 5000,
+  '/v1/pulse/threat-intel': 5000,
+  '/v1/pulse/threat-intel/sanitize': 5000,
+  '/v1/pulse/polymarket-velocity': 10000,
+  '/v1/pulse/arb-routes': 10000,
+  '/v1/pass/prepay': 5000000,
+};
+
+function parsePaymentAmount(headerVal) {
+  if (!headerVal || typeof headerVal !== 'string') return null;
+  try {
+    const raw = headerVal.trim().startsWith('{') ? headerVal : atob(headerVal);
+    const parsed = JSON.parse(raw);
+    if (parsed.payload?.authorization?.value !== undefined) {
+      const v = Number(parsed.payload.authorization.value);
+      if (Number.isFinite(v)) return v;
+    }
+    if (parsed.accepted?.amount !== undefined) {
+      const v = Number(parsed.accepted.amount);
+      if (Number.isFinite(v)) return v;
+    }
+  } catch {}
+  return null;
+}
+
 class InputFailure extends Error {
   constructor(code, status) { super(code); this.status = status; }
 }
@@ -95,6 +121,16 @@ export function createGateway(fetcher = (...args) => fetch(...args)) {
     headers.set('User-Agent', 'Pulse402-Canonical-Gateway/2.0');
     headers.set('Cache-Control', 'no-store'); headers.set('Pragma', 'no-cache');
     const potentiallyCharged = request.method === 'POST' || ['PAYMENT-SIGNATURE', 'X-PAYMENT', 'X-Pulse-Session'].some(name => request.headers.has(name));
+    const requiredAtomic = ROUTE_MIN_ATOMIC[incoming.pathname];
+    if (requiredAtomic) {
+      const sigHeader = request.headers.get('PAYMENT-SIGNATURE') || request.headers.get('X-PAYMENT') || request.headers.get('X-Payment-Signature');
+      if (sigHeader) {
+        const offered = parsePaymentAmount(sigHeader);
+        if (offered !== null && offered < requiredAtomic) {
+          return failure('insufficient_payment_amount', 402);
+        }
+      }
+    }
     try {
       // Cloudflare supports manual redirects (not Fetch's error mode).
       // Never retry a payment or relay its authorization to another origin.

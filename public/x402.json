@@ -7,16 +7,18 @@
     "network": "eip155:8453",
     "payTo": "0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6",
     "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "standard_call_usd": "0.001",
+    "tier1_safety_usd": "0.005",
+    "tier2_alpha_usd": "0.01",
     "prepay_session_usd": "5.000",
-    "prepay_session_calls": 6000
+    "prepay_session_calls": 2500,
+    "prepay_savings": "60%-80% ($0.002/call effective)"
   },
   "payment_networks": [
     {
       "scheme": "exact",
       "network": "eip155:8453",
       "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-      "amount": "1000",
+      "amount": "5000",
       "maxTimeoutSeconds": 300,
       "payTo": "0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6",
       "extra": {
@@ -28,7 +30,7 @@
       "scheme": "exact",
       "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
       "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-      "amount": "1000",
+      "amount": "5000",
       "maxTimeoutSeconds": 300,
       "payTo": "9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh",
       "extra": {
@@ -42,25 +44,33 @@
     {
       "path": "/v1/pulse/base-liquidity",
       "method": "GET",
-      "price": "0.001",
+      "price": "0.005",
+      "amount_atomic": "5000",
+      "tier": 1,
       "description": "Base liquidity, pool balance changes and amount-specific quotes"
-    },
-    {
-      "path": "/v1/pulse/polymarket-velocity",
-      "method": "GET",
-      "price": "0.001",
-      "description": "Live Polymarket probability velocity & orderbook spread imbalances"
     },
     {
       "path": "/v1/pulse/threat-intel",
       "method": "GET",
-      "price": "0.001",
+      "price": "0.005",
+      "amount_atomic": "5000",
+      "tier": 1,
       "description": "Sampled provider token-risk evidence and scoped text sanitization"
+    },
+    {
+      "path": "/v1/pulse/polymarket-velocity",
+      "method": "GET",
+      "price": "0.01",
+      "amount_atomic": "10000",
+      "tier": 2,
+      "description": "Live Polymarket probability velocity & orderbook spread imbalances"
     },
     {
       "path": "/v1/pulse/arb-routes",
       "method": "GET",
-      "price": "0.001",
+      "price": "0.01",
+      "amount_atomic": "10000",
+      "tier": 2,
       "description": "Pinned-block distinct-pool gross round-trip quotes"
     }
   ]

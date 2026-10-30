@@ -23,7 +23,7 @@ class ActorStub:
         self.sequence = []
         self.budget = None
         self.ppe = True
-        self.prices = {"oracle-feed-fetch": Decimal("0.02")}
+        self.prices = {"oracle-feed-fetch": Decimal("0.025")}
         self.storage_error = None
         self.billing_error = None
         self.after_push = lambda: None
@@ -190,7 +190,7 @@ def test_ppe_budget_caps_full_feed_deliveries_and_avoids_zero_budget_acquisition
         acquired.assert_not_awaited()
 
 
-@pytest.mark.parametrize("ppe,prices", [(False, {"oracle-feed-fetch": Decimal("0.02")}), (True, {}), (True, {"oracle-feed-fetch": Decimal(0)}), (True, {"oracle-feed-fetch": Decimal("NaN")})])
+@pytest.mark.parametrize("ppe,prices", [(False, {"oracle-feed-fetch": Decimal("0.025")}), (True, {}), (True, {"oracle-feed-fetch": Decimal(0)}), (True, {"oracle-feed-fetch": Decimal("NaN")})])
 def test_missing_or_free_ppe_configuration_fails_before_provider_or_delivery(actor, ppe, prices):
     module, fake, acquired, _ = actor
     fake.ppe, fake.prices = ppe, prices

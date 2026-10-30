@@ -7,6 +7,10 @@
   "meta": {
     "templateId": "python-start"
   },
+  "pricing": {
+    "pricingModel": "PAY_PER_EVENT",
+    "pricePerUnitUsd": 0.025
+  },
   "categories": [
     "AI",
     "AGENTS",

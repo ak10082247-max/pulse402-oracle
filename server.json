@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ak10082247-max/pulse402-oracle",
   "title": "Pulse402 Oracle",
-  "description": "Consumable x402 data oracle providing Base DEX liquidity & Polymarket velocity for AI agents.",
-  "version": "1.2.0",
+  "description": "Consumable x402 data oracle providing Base DEX liquidity ($0.005), Polymarket velocity ($0.01), threat intel ($0.005), and cross-DEX arb routes ($0.01) for AI agents.",
+  "version": "1.3.0",
   "websiteUrl": "https://pulse402-oracle.ak10082247.workers.dev",
   "repository": {
     "url": "https://github.com/ak10082247-max/pulse402-oracle",
