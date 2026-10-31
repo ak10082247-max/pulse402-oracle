@@ -12,12 +12,12 @@ Every response preserves its original observation timestamp and a strict 10-seco
 
 | Feed | Route | Tier | Price (USDC) | Atomic Units | Description |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **Base DEX Liquidity** | `/v1/pulse/base-liquidity` | **Tier 1** | **$0.005** | `5,000` | Pinned-block Uniswap V3 & Aerodrome pool reserves, slippage quotes for $100 / $1k / $10k USDC, and pool balance shifts. |
-| **GoPlus Threat Intel** | `/v1/pulse/threat-intel` | **Tier 1** | **$0.005** | `5,000` | Real-time honeypot flags, malicious spender checks, and deterministic prompt-injection text sanitization. |
-| **Polymarket Velocity** | `/v1/pulse/polymarket-velocity` | **Tier 2** | **$0.010** | `10,000` | Live CLOB orderbook bid/ask depth, 5-minute probability movement, and momentum signals from real exchange price history. |
-| **Cross-DEX Arb Routes** | `/v1/pulse/arb-routes` | **Tier 2** | **$0.010** | `10,000` | Distinct-pool gross round-trip quotes across Base pools with fee deductions and pinned-block execution state. |
-| **Solana Pump.fun & Raydium** | `/v1/pulse/solana-velocity` | **Tier 2** | **$0.010** | `10,000` | Real-time Solana Pump.fun and Raydium token velocity, trending boosted tokens, 5m volume, and bonding curve status for sniper bots. |
-| **HFT Session Pass** | `POST /v1/pass/prepay` | **Tier 3** | **$5.000** | `5,000,000` | **2,500 zero-latency calls** ($0.002/call effective rate — saves 60%–80% over per-call settlement and eliminates signing latency). |
+| **Base DEX Liquidity** | `/v1/pulse/base-liquidity` | **Tier 1** | **$0.020** | `20,000` | Pinned-block Uniswap V3 & Aerodrome pool reserves, slippage quotes for $100 / $1k / $10k USDC, and pool balance shifts. |
+| **GoPlus Threat Intel** | `/v1/pulse/threat-intel` | **Tier 1** | **$0.020** | `20,000` | Real-time honeypot flags, malicious spender checks, and deterministic prompt-injection text sanitization. |
+| **Polymarket Velocity** | `/v1/pulse/polymarket-velocity` | **Tier 2** | **$0.050** | `50,000` | Live CLOB orderbook bid/ask depth, 5-minute probability movement, and momentum signals from real exchange price history. |
+| **Cross-DEX Arb Routes** | `/v1/pulse/arb-routes` | **Tier 2** | **$0.050** | `50,000` | Distinct-pool gross round-trip quotes across Base pools with fee deductions and pinned-block execution state. |
+| **Solana Pump.fun & Raydium** | `/v1/pulse/solana-velocity` | **Tier 2** | **$0.050** | `50,000` | Real-time Solana Pump.fun and Raydium token velocity, trending boosted tokens, 5m volume, and bonding curve status for sniper bots. |
+| **HFT Session Pass** | `POST /v1/pass/prepay` | **Tier 3** | **$10.000** | `10,000,000` | **1,000 zero-latency calls** ($0.010/call effective rate — saves 50%–80% over per-call settlement and eliminates signing latency). |
 
 ---
 
@@ -44,8 +44,8 @@ Pulse402 accepts gasless, partial-signed x402 V2 authorizations on both major ag
 
 High-frequency algorithmic bots and multi-agent swarms can eliminate on-chain signing latency and save 60%–80% on fees by activating a prepaid session pass:
 
-1. **Purchase**: Send a one-time `$5.00 USDC` payment on Base or Solana to `POST /v1/pass/prepay`.
-2. **Receipt**: Server returns a cryptographically secure `session_token` with 2,500 prepaid calls valid for 7 days.
+1. **Purchase**: Send a one-time `$10.00 USDC` payment on Base or Solana to `POST /v1/pass/prepay`.
+2. **Receipt**: Server returns a cryptographically secure `session_token` with 1,000 prepaid calls valid for 7 days.
 3. **Execution**: Include the header `X-Pulse-Session: <token>` and `Idempotency-Key: <uuid>` on any paid endpoint.
 4. **Zero Latency**: Calls execute instantly without waiting for on-chain signature verification or facilitator relay.
 

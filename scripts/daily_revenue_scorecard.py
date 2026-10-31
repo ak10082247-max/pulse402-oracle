@@ -204,14 +204,14 @@ Grand Treasury Total: ${grand_treasury:,.6f} USDC
 
 2. PRICING TIERS & UNIT ECONOMICS
 ---------------------------------------------------------------
-• Tier 1 (Pre-Trade Safety & Liquidity): $0.005 USDC (5,000 atomic units)
+• Tier 1 (Pre-Trade Safety & Liquidity): $0.020 USDC (20,000 atomic units)
   - /v1/pulse/base-liquidity
   - /v1/pulse/threat-intel
-• Tier 2 (Actionable Alpha & Arbitrage): $0.010 USDC (10,000 atomic units)
+• Tier 2 (Actionable Alpha & Arbitrage): $0.050 USDC (50,000 atomic units)
   - /v1/pulse/polymarket-velocity
   - /v1/pulse/arb-routes
-• Tier 3 (HFT Session Pass): $5.00 USDC for 2,500 zero-latency calls
-  - $0.002 effective rate per call (60%–80% savings for bots)
+• Tier 3 (HFT Session Pass): $10.00 USDC for 1,000 zero-latency calls
+  - $0.010 effective rate per call (50%–80% savings for bots)
 • Apify PPE Event Rate: $0.025 USD ($0.020 net after 20% commission)
 
 3. FLEET TELEMETRY & TRAFFIC

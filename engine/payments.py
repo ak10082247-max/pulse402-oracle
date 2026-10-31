@@ -63,7 +63,7 @@ def b58decode(value):
     return b"\0" * (len(value) - len(value.lstrip("1"))) + number.to_bytes((number.bit_length() + 7) // 8, "big")
 
 
-def requirements(amount="5000"):
+def requirements(amount="20000"):
     base_wallet = os.getenv("PAYOUT_WALLET_ADDRESS", "0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6").strip()
     sol_wallet = os.getenv("SOLANA_MERCHANT_ADDRESS", "9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh").strip()
     if base_wallet.lower() == "0x73279fa4bada7cac888c62cda4f5c8104765f6f1":
@@ -82,7 +82,7 @@ def requirements(amount="5000"):
     ]
 
 
-def challenge(path, amount="5000", description="Pulse402 paid oracle delivery"):
+def challenge(path, amount="20000", description="Pulse402 paid oracle delivery"):
     return {"x402Version": 2, "error": "Payment required", "resource": {"url": PUBLIC_URL + path, "description": description, "mimeType": "application/json"}, "accepts": requirements(amount)}
 
 
@@ -309,7 +309,7 @@ async def _finish_paid_delivery(identity, owner, result, receipt, acquire, deliv
             if current["result"] != encoded and delivery_valid is not None:
                 _archive_delivery(db, current, "REPLACED_AFTER_CONFIRMED_SETTLEMENT")
             if prepay:
-                db.execute("INSERT INTO sessions(token_hash,expires,remaining,purchase_id) VALUES(?,?,2500,?)", (hashlib.sha256(result["session_token"].encode()).hexdigest(), result["expires_at_unix"], identity))
+                db.execute("INSERT INTO sessions(token_hash,expires,remaining,purchase_id) VALUES(?,?,1000,?)", (hashlib.sha256(result["session_token"].encode()).hexdigest(), result["expires_at_unix"], identity))
             changed = db.execute("UPDATE purchases SET state='delivered',result=?,receipt=?,updated=? WHERE id=? AND owner=? AND state='paid_pending_fulfillment'", (encoded, canonical(receipt), time.time(), identity, owner)).rowcount
             if changed != 1:
                 raise PaymentError("PAID_FULFILLMENT_SUPERSEDED", 409, charged=True)
@@ -348,7 +348,7 @@ async def repair_confirmed_delivery(identity, path, arguments, acquire, *, deliv
             raise PaymentError("PAYMENT_RECOVERY_REQUIRED", 409, charged="unknown")
         try:
             stored = json.loads(previous["receipt"])
-            stored_amount = str(stored.get("amount", "5000"))
+            stored_amount = str(stored.get("amount", "20000"))
             quote = next(item for item in requirements(stored_amount) if item["network"] == stored.get("network"))
             payer = stored["payer"]
             if quote["network"] == BASE:
@@ -367,7 +367,7 @@ async def repair_confirmed_delivery(identity, path, arguments, acquire, *, deliv
     return await _finish_paid_delivery(identity, owner, result, receipt, acquire, delivery_valid, replayed=True)
 
 
-async def execute_purchase(raw_header, path, arguments, acquire, *, amount="5000", prepay=False, delivery_valid=None):
+async def execute_purchase(raw_header, path, arguments, acquire, *, amount="20000", prepay=False, delivery_valid=None):
     payment, quote, identity, payer = owned_payment(raw_header, path, amount)
     fingerprint, owner, now = digest({"path": path, "arguments": arguments}), secrets.token_hex(16), time.time()
     recovery = None
@@ -509,4 +509,4 @@ async def execute_session(token, request_id, path, arguments, acquire, *, delive
 
 
 def prepay_result():
-    return {"status": "active", "session_token": "pulse_sess_" + secrets.token_urlsafe(32), "calls_allocated": 2500, "calls_remaining": 2500, "expires_at_unix": int(time.time()) + 7 * 86400, "instructions": "Attach X-Pulse-Session and a unique Idempotency-Key per call. Reuse the key and identical arguments to recover a lost response without another credit."}
+    return {"status": "active", "session_token": "pulse_sess_" + secrets.token_urlsafe(32), "calls_allocated": 1000, "calls_remaining": 1000, "expires_at_unix": int(time.time()) + 7 * 86400, "instructions": "Attach X-Pulse-Session and a unique Idempotency-Key per call. Reuse the key and identical arguments to recover a lost response without another credit."}

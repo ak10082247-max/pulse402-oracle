@@ -27,7 +27,7 @@ PATH = "/v1/pulse/base-liquidity"
 PRIVATE_RECORD = {"symbol": "WETH", "private_marker": "FULL_PAID_RECORD_OWNER_FIXTURE"}
 
 
-def base_payment(path=PATH, *, amount="5000", nonce=1, valid_before=None, valid_after=0):
+def base_payment(path=PATH, *, amount="20000", nonce=1, valid_before=None, valid_after=0):
     quote = payments.requirements(amount)[0]
     auth = {"from": PAYER, "to": quote["payTo"], "value": amount, "validAfter": str(valid_after), "validBefore": str(valid_before or int(time.time()) + 180), "nonce": "0x" + format(nonce, "064x")}
     fields = [("from", "address"), ("to", "address"), ("value", "uint256"), ("validAfter", "uint256"), ("validBefore", "uint256"), ("nonce", "bytes32")]
@@ -36,7 +36,7 @@ def base_payment(path=PATH, *, amount="5000", nonce=1, valid_before=None, valid_
     return {"x402Version": 2, "accepted": quote, "resource": {"url": payments.PUBLIC_URL + path}, "payload": {"authorization": auth, "signature": signature}}
 
 
-def solana_payment(path=PATH, *, amount="5000", unique=1):
+def solana_payment(path=PATH, *, amount="20000", unique=1):
     key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex("07" * 32))
     buyer = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     quote = payments.requirements(amount)[1]
@@ -123,7 +123,7 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.json()["data"], [PRIVATE_RECORD])
             receipt = json.loads(base64.b64decode(result.headers["payment-response"]))
             self.assertTrue(receipt["success"])
-            self.assertEqual(receipt["amount"], "5000")
+            self.assertEqual(receipt["amount"], "20000")
             self.assertEqual(receipt["network"], payment["accepted"]["network"])
             self.assertEqual(receipt["resource"]["url"], payments.PUBLIC_URL + PATH)
         self.assertEqual([call.args[0] for call in self.fac.await_args_list], ["verify", "settle", "verify", "settle"])
@@ -143,24 +143,24 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
         self.acquire.assert_not_awaited()
 
     async def test_prepaid_pass_settles_five_usdc_once_before_allocating_6000_credits(self):
-        header = {"PAYMENT-SIGNATURE": encoded(base_payment("/v1/pass/prepay", amount="5000000", nonce=20))}
+        header = {"PAYMENT-SIGNATURE": encoded(base_payment("/v1/pass/prepay", amount="10000000", nonce=20))}
         with payments.database() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
         first = await self.client.post("/v1/pass/prepay", json={}, headers=header)
         second = await self.client.post("/v1/pass/prepay", json={}, headers=header)
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.json(), second.json())
-        self.assertEqual(first.json()["calls_allocated"], 2500)
-        self.assertEqual(first.json()["calls_remaining"], 2500)
-        self.assertEqual(json.loads(base64.b64decode(first.headers["payment-response"]))["amount"], "5000000")
+        self.assertEqual(first.json()["calls_allocated"], 1000)
+        self.assertEqual(first.json()["calls_remaining"], 1000)
+        self.assertEqual(json.loads(base64.b64decode(first.headers["payment-response"]))["amount"], "10000000")
         self.assertEqual([call.args[0] for call in self.fac.await_args_list], ["verify", "settle"])
         with payments.database() as db:
             row = db.execute("SELECT remaining,token_hash FROM sessions").fetchone()
-        self.assertEqual(row[0], 2500)
+        self.assertEqual(row[0], 1000)
         self.assertEqual(row[1], hashlib.sha256(first.json()["session_token"].encode()).hexdigest())
 
     async def test_bad_prepay_receipt_allocates_no_credit_and_same_auth_never_resettles(self):
-        payment = base_payment("/v1/pass/prepay", amount="5000000", nonce=21)
+        payment = base_payment("/v1/pass/prepay", amount="10000000", nonce=21)
         async def bad(action, envelope):
             return {"isValid": True} if action == "verify" else {"success": True, "transaction": "fabricated", "payer": PAYER, "network": payments.BASE}
         self.fac.side_effect = bad
@@ -175,13 +175,13 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.execute("SELECT state FROM purchases").fetchone()[0], "unknown")
 
     async def test_solana_prepay_requires_exact_five_usdc_settlement(self):
-        payment = solana_payment("/v1/pass/prepay", amount="5000000", unique=22)
+        payment = solana_payment("/v1/pass/prepay", amount="10000000", unique=22)
         response = await self.client.post("/v1/pass/prepay", json={}, headers={"PAYMENT-SIGNATURE": encoded(payment)})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["calls_allocated"], 2500)
+        self.assertEqual(response.json()["calls_allocated"], 1000)
         receipt = json.loads(base64.b64decode(response.headers["payment-response"]))
         self.assertEqual(receipt["network"], payments.SOLANA)
-        self.assertEqual(receipt["amount"], "5000000")
+        self.assertEqual(receipt["amount"], "10000000")
         self.assertEqual([call.args[0] for call in self.fac.await_args_list], ["verify", "settle"])
 
     async def test_all_ambiguous_receipt_fields_quarantine_without_delivering(self):
@@ -285,7 +285,7 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_preparation_owner_reclaim_fences_paused_worker(self):
         payment = base_payment(nonce=60)
         raw = payments.canonical(payment)
-        _, _, identity, _ = payments.owned_payment(raw, PATH, "5000")
+        _, _, identity, _ = payments.owned_payment(raw, PATH, "20000")
         entered, resume = asyncio.Event(), asyncio.Event()
         counter = 0
         async def acquire():
@@ -335,7 +335,7 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
         self.acquire.assert_not_awaited()
 
     async def make_session(self):
-        response = await self.client.post("/v1/pass/prepay", json={}, headers={"PAYMENT-SIGNATURE": encoded(base_payment("/v1/pass/prepay", amount="5000000", nonce=70))})
+        response = await self.client.post("/v1/pass/prepay", json={}, headers={"PAYMENT-SIGNATURE": encoded(base_payment("/v1/pass/prepay", amount="10000000", nonce=70))})
         self.assertEqual(response.status_code, 200)
         self.fac.reset_mock()
         return response.json()["session_token"]
@@ -349,7 +349,7 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["error"], "FULFILLMENT_TOO_LARGE")
         self.assertIs(response.json()["charged"], False)
         with payments.database() as db:
-            self.assertEqual(db.execute("SELECT remaining FROM sessions").fetchone()[0], 2500)
+            self.assertEqual(db.execute("SELECT remaining FROM sessions").fetchone()[0], 1000)
             self.assertEqual(db.execute("SELECT count(*) FROM credit_deliveries").fetchone()[0], 0)
         self.fac.assert_not_awaited()
 
@@ -379,7 +379,7 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("private provider trace", response.text)
                     self.assert_no_private_record(response)
                 with payments.database() as db:
-                    self.assertEqual(db.execute("SELECT remaining FROM sessions").fetchone()[0], 2500)
+                    self.assertEqual(db.execute("SELECT remaining FROM sessions").fetchone()[0], 1000)
                     self.assertEqual(db.execute("SELECT count(*) FROM credit_deliveries").fetchone()[0], 0)
                     self.assertEqual(db.execute("SELECT count(*) FROM purchases").fetchone()[0], 1)  # successful prepay only
         self.assertEqual([call.args[0] for call in self.fac.await_args_list], ["verify"] * 3)
@@ -406,7 +406,7 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
                 retry = await self.client.get(PATH, headers=headers)
                 self.assertEqual(retry.status_code, 409)
                 self.assertEqual([call.args[0] for call in self.fac.await_args_list], ["verify", "settle"])
-                _, _, identity, _ = payments.owned_payment(payments.canonical(payment), PATH, "5000")
+                _, _, identity, _ = payments.owned_payment(payments.canonical(payment), PATH, "20000")
                 with payments.database() as db:
                     row = db.execute("SELECT state,result,receipt FROM purchases WHERE id=?", (identity,)).fetchone()
                 self.assertEqual(row[0], "unknown")
@@ -438,8 +438,8 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
         conflict = await self.client.get(PATH + "?symbol=AERO", headers=headers)
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
-        self.assertEqual(first.headers["x-pulse-calls-remaining"], "2499")
-        self.assertEqual(second.headers["x-pulse-calls-remaining"], "2499")
+        self.assertEqual(first.headers["x-pulse-calls-remaining"], "999")
+        self.assertEqual(second.headers["x-pulse-calls-remaining"], "999")
         self.assertEqual(second.headers["idempotency-replayed"], "true")
         self.assertEqual(conflict.status_code, 409)
         self.fac.assert_not_awaited()
@@ -459,7 +459,7 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(arrived.wait(), timeout=10)
         resume.set()
         result = await asyncio.gather(*tasks)
-        self.assertEqual([entry[1] for entry in result], [2499, 2499])
+        self.assertEqual([entry[1] for entry in result], [999, 999])
         self.assertEqual(sorted(entry[3] for entry in result), [False, True])
 
     async def test_final_credit_cannot_be_spent_twice_by_concurrent_different_requests(self):
@@ -485,15 +485,15 @@ class PaymentGateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.execute("SELECT count(*) FROM credit_deliveries").fetchone()[0], 1)
 
     async def test_underpayment_rejected_with_insufficient_payment_amount(self):
-        # Tier 1 endpoint (/v1/pulse/base-liquidity) requires 5000 units. Send 1000.
+        # Tier 1 endpoint (/v1/pulse/base-liquidity) requires 20000 units. Send 1000.
         underpaid = base_payment(PATH, amount="1000", nonce=99)
         response = await self.client.get(PATH, headers={"PAYMENT-SIGNATURE": encoded(underpaid)})
         self.assertEqual(response.status_code, 402)
         self.assertEqual(response.json()["error"], "insufficient_payment_amount")
         self.fac.assert_not_awaited()
 
-        # Tier 2 endpoint (/v1/pulse/polymarket-velocity) requires 10000 units. Send 5000.
-        underpaid_tier2 = base_payment("/v1/pulse/polymarket-velocity", amount="5000", nonce=100)
+        # Tier 2 endpoint (/v1/pulse/polymarket-velocity) requires 50000 units. Send 20000.
+        underpaid_tier2 = base_payment("/v1/pulse/polymarket-velocity", amount="20000", nonce=100)
         response_t2 = await self.client.get("/v1/pulse/polymarket-velocity", headers={"PAYMENT-SIGNATURE": encoded(underpaid_tier2)})
         self.assertEqual(response_t2.status_code, 402)
         self.assertEqual(response_t2.json()["error"], "insufficient_payment_amount")

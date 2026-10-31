@@ -31,7 +31,7 @@ class PaidDeliveryFreshnessTests(unittest.IsolatedAsyncioTestCase):
         self.fac_patch.start()
         self.payment = fixtures.base_payment(nonce=700)
         self.raw = payments.canonical(self.payment)
-        self.identity = payments.owned_payment(self.raw, fixtures.PATH, "5000")[2]
+        self.identity = payments.owned_payment(self.raw, fixtures.PATH, "20000")[2]
 
     async def asyncTearDown(self):
         self.fac_patch.stop()
@@ -93,7 +93,7 @@ class PaidDeliveryFreshnessTests(unittest.IsolatedAsyncioTestCase):
         for index, payment in enumerate((self.payment, fixtures.solana_payment(unique=701))):
             with self.subTest(chain=payment["accepted"]["network"]):
                 self.raw = payments.canonical(payment)
-                self.identity = payments.owned_payment(self.raw, fixtures.PATH, "5000")[2]
+                self.identity = payments.owned_payment(self.raw, fixtures.PATH, "20000")[2]
                 first = self.snapshot("prepared-" + str(index), 2000)
                 count = 0
                 async def acquire():

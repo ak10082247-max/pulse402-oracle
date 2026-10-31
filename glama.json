@@ -19,8 +19,8 @@
     "dual-chain-oracle"
   ],
   "pricing": {
-    "tier1_usd": 0.005,
-    "tier2_usd": 0.010,
-    "session_pass_usd": 5.00
+    "tier1_usd": 0.02,
+    "tier2_usd": 0.05,
+    "session_pass_usd": 10.00
   }
 }

@@ -46,9 +46,9 @@
         "endpoint": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
         "protocolVersion": "2026-07-28",
         "pricingTiers": {
-          "tier1_micro": 5000,
-          "tier2_micro": 10000,
-          "hft_session_pass_micro": 5000000
+          "tier1_micro": 20000,
+          "tier2_micro": 50000,
+          "hft_session_pass_micro": 10000000
         }
       }
     ]

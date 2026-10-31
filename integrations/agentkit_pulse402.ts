@@ -5,9 +5,9 @@
  * and session-based High-Frequency Trading (HFT) pass consumption.
  *
  * Unit Economics:
- * - Tier 1: $0.005 USDC (/v1/pulse/base-liquidity, /v1/pulse/threat-intel)
- * - Tier 2: $0.010 USDC (/v1/pulse/polymarket-velocity, /v1/pulse/arb-routes)
- * - High-Frequency Pass: $5.00 USDC for 2,500 zero-latency calls ($0.002/call)
+ * - Tier 1: $0.020 USDC (/v1/pulse/base-liquidity, /v1/pulse/threat-intel)
+ * - Tier 2: $0.050 USDC (/v1/pulse/polymarket-velocity, /v1/pulse/arb-routes, /v1/pulse/solana-velocity)
+ * - High-Frequency Pass: $10.00 USDC for 1,000 zero-latency calls ($0.010/call)
  */
 
 export interface Pulse402Config {
@@ -103,7 +103,7 @@ export class Pulse402AgentKitTool {
   }
 
   /**
-   * Acquires a 2,500-call HFT Session Pass for $5.00 USDC via Base EIP-3009.
+   * Acquires a 1,000-call HFT Session Pass for $10.00 USDC via Base EIP-3009.
    */
   public async acquireSessionPass(): Promise<{ sessionToken: string; callsAllocated: number }> {
     const challengeRes = await fetch(`${this.baseUrl}/v1/pass/prepay`, {
@@ -131,7 +131,7 @@ export class Pulse402AgentKitTool {
 
     // AgentKit / Viem / Ethers EIP-712 TransferWithAuthorization signing would occur here.
     // In production, instantiate your Viem WalletClient or AgentKit WalletProvider.
-    const signedPayload = await this.signEip3009Authorization(baseAccepted, '5000000');
+    const signedPayload = await this.signEip3009Authorization(baseAccepted, '10000000');
 
     const paymentSignature = btoa(JSON.stringify({
       x402Version: 2,

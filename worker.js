@@ -20,13 +20,13 @@ const RESPONSE_STRIP = ['Connection', 'Keep-Alive', 'Proxy-Authenticate', 'Proxy
   'TE', 'Trailer', 'Transfer-Encoding', 'Upgrade', 'Set-Cookie', 'Set-Cookie2'];
 
 const ROUTE_MIN_ATOMIC = {
-  '/v1/pulse/base-liquidity': 5000,
-  '/v1/pulse/threat-intel': 5000,
-  '/v1/pulse/threat-intel/sanitize': 5000,
-  '/v1/pulse/polymarket-velocity': 10000,
-  '/v1/pulse/arb-routes': 10000,
-  '/v1/pulse/solana-velocity': 10000,
-  '/v1/pass/prepay': 5000000,
+  '/v1/pulse/base-liquidity': 20000,
+  '/v1/pulse/threat-intel': 20000,
+  '/v1/pulse/threat-intel/sanitize': 20000,
+  '/v1/pulse/polymarket-velocity': 50000,
+  '/v1/pulse/arb-routes': 50000,
+  '/v1/pulse/solana-velocity': 50000,
+  '/v1/pass/prepay': 10000000,
 };
 
 function parsePaymentAmount(headerVal) {

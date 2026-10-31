@@ -63,6 +63,17 @@ async def fetch_solana_velocity_state(client=None):
         except Exception:
             pass
 
+    # Final fallback to canonical high-liquidity Solana pairs if both search and boosts are rate-limited
+    if not raw_pairs:
+        try:
+            canonical_mints = "So11111111111111111111111111111111111111112,DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263,EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm,MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5"
+            res_canonical = await client.get(DEXSCREENER_TOKENS_URL + canonical_mints, headers=headers)
+            if res_canonical.status_code == 200:
+                data = res_canonical.json()
+                raw_pairs.extend([p for p in data.get("pairs", []) if p.get("chainId") == "solana"])
+        except Exception:
+            pass
+
     if not raw_pairs:
         raise QuoteError("DEXSCREENER_UNAVAILABLE", "DexScreener API returned no valid Solana pairs", 503)
 

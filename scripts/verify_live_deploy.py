@@ -41,11 +41,11 @@ def test_endpoint(path, expected_amount, method="GET"):
         return True
 
 print("=== LIVE EDGE PRICING VERIFICATION ===")
-p1 = test_endpoint("/v1/pulse/base-liquidity", 5000)
-p2 = test_endpoint("/v1/pulse/threat-intel", 5000)
-p3 = test_endpoint("/v1/pulse/polymarket-velocity", 10000)
-p4 = test_endpoint("/v1/pulse/arb-routes", 10000)
-p5 = test_endpoint("/v1/pass/prepay", 5000000, method="POST")
+p1 = test_endpoint("/v1/pulse/base-liquidity", 20000)
+p2 = test_endpoint("/v1/pulse/threat-intel", 20000)
+p3 = test_endpoint("/v1/pulse/polymarket-velocity", 50000)
+p4 = test_endpoint("/v1/pulse/arb-routes", 50000)
+p5 = test_endpoint("/v1/pass/prepay", 10000000, method="POST")
 
 print("\n=== LIVE TELEMETRY VERIFICATION ===")
 req_tel = urllib.request.Request(f"{BASE_URL}/v1/telemetry/summary", headers={"User-Agent": "Verification-Suite/1.0"})

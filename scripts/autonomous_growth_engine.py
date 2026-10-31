@@ -219,9 +219,9 @@ Current Live Oracle Feeds:
 • Solana Pump.fun & Raydium Velocity (/v1/pulse/solana-velocity): Live trending meme coin orderflow, 5m volume, price delta, and bonding curve status for Solana sniper bots.
 
 Tiered Pricing:
-- Tier 1 (Pre-Trade Safety & Liquidity): $0.005 USDC per call
-- Tier 2 (Actionable Alpha & Arbitrage): $0.01 USDC per call
-- High-Frequency Pass (POST /v1/pass/prepay): $5.00 USDC for 2,500 zero-latency calls ($0.002/call effective rate — saves 60%–80% and completely eliminates per-call signing latency).
+- Tier 1 (Pre-Trade Safety & Liquidity): $0.020 USDC per call
+- Tier 2 (Actionable Alpha & Arbitrage): $0.050 USDC per call
+- High-Frequency Pass (POST /v1/pass/prepay): $10.00 USDC for 1,000 zero-latency calls ($0.010/call effective rate — saves 60%–80% and completely eliminates per-call signing latency).
 
 Quick Start (No API key needed — pay per call on-chain or pass an HFT session token):
   curl -X GET "https://pulse402-oracle.ak10082247.workers.dev/v1/preview/polymarket-velocity"

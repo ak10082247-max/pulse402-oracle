@@ -18,6 +18,6 @@ startCommand:
   url: https://pulse402-oracle.ak10082247.workers.dev/mcp
 config:
   pricing:
-    tier1: "$0.005 USDC (/v1/pulse/base-liquidity, /v1/pulse/threat-intel)"
-    tier2: "$0.010 USDC (/v1/pulse/polymarket-velocity, /v1/pulse/arb-routes, /v1/pulse/solana-velocity)"
-    tier3_pass: "$5.00 USDC (2,500 zero-latency calls via POST /v1/pass/prepay)"
+    tier1: "$0.020 USDC (/v1/pulse/base-liquidity, /v1/pulse/threat-intel)"
+    tier2: "$0.050 USDC (/v1/pulse/polymarket-velocity, /v1/pulse/arb-routes, /v1/pulse/solana-velocity)"
+    tier3_pass: "$10.00 USDC (1,000 zero-latency calls via POST /v1/pass/prepay)"
