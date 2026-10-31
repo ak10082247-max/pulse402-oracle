@@ -1,14 +1,34 @@
 {
   "name": "pulse402-oracle",
-  "description": "High-Frequency Consumable Market & Security Telemetry Oracle for AI Agents",
-  "version": "1.0.0",
+  "description": "High-Frequency Dual-Chain (Base & Solana) Consumable Market & Security Telemetry Oracle for AI Trading Agents",
+  "version": "1.3.1",
   "transport": {
     "type": "http",
-    "endpoint": "https://pulse402-oracle.onrender.com/mcp"
+    "endpoint": "https://pulse402-oracle.ak10082247.workers.dev/mcp"
   },
   "capabilities": {
     "tools": true,
     "resources": false,
     "prompts": false
+  },
+  "keywords": [
+    "solana-pumpfun-sniper",
+    "solana-raydium-velocity",
+    "polymarket-arbitrage",
+    "base-liquidity-velocity",
+    "honeypot-pretrade-simulation",
+    "aerodrome-slippage",
+    "pre-swap-guard",
+    "x402-oracle",
+    "dual-chain-oracle"
+  ],
+  "networks": [
+    "eip155:8453",
+    "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+  ],
+  "pricing": {
+    "tier1_usd": 0.02,
+    "tier2_usd": 0.05,
+    "session_pass_usd": 10.0
   }
 }

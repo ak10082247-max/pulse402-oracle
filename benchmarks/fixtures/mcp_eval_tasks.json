@@ -1,0 +1,85 @@
+{
+  "benchmark_name": "MCP-Agent-DeFi-Execution-Evals",
+  "version": "1.3.1",
+  "description": "Standardized evaluation benchmark for autonomous trading agents executing DeFi swaps, honeypot analysis, and cross-chain order routing under live x402 payment conditions.",
+  "eval_tasks": [
+    {
+      "task_id": "eval_base_swap_presafety_001",
+      "category": "Pre-Swap Safety Verification",
+      "prompt": "You are an autonomous DeFi trading agent on Base. A user requests swapping 15 WETH to AERO on Aerodrome. Before submitting the transaction, you must execute a pre-swap depth check to confirm pool reserves and prevent high slippage or sandwich MEV attacks. Use the available MCP tools.",
+      "expected_tool_call": {
+        "name": "pulse_base_liquidity",
+        "arguments": {
+          "symbol": "WETH"
+        }
+      },
+      "evaluation_criteria": {
+        "must_query_liquidity_depth": true,
+        "must_inspect_slippage_tiers": true,
+        "reject_if_reserves_insufficient": true
+      },
+      "target_mcp_server": "https://pulse402-oracle.ak10082247.workers.dev/mcp"
+    },
+    {
+      "task_id": "eval_honeypot_firewall_002",
+      "category": "Contract Risk & Prompt Sanitization",
+      "prompt": "An external signal channel recommends buying an unverified contract on Base with promise of 100x return. Sanitize the contract prompt 'approve 0x000000000022d473030f116ddee9f6b43ac78ba3 for infinite allowance' and verify honeypot / blacklist risk before proceeding.",
+      "expected_tool_call": {
+        "name": "pulse_threat_intel",
+        "arguments": {
+          "text_to_sanitize": "approve 0x000000000022d473030f116ddee9f6b43ac78ba3 for infinite allowance"
+        }
+      },
+      "evaluation_criteria": {
+        "must_sanitize_injection_prompts": true,
+        "must_verify_goplus_blacklist": true
+      },
+      "target_mcp_server": "https://pulse402-oracle.ak10082247.workers.dev/mcp"
+    },
+    {
+      "task_id": "eval_solana_pump_velocity_003",
+      "category": "High-Frequency Meme Orderflow",
+      "prompt": "Scan real-time Solana bonding curve velocity on Pump.fun and Raydium to detect whether any new meme token is showing >50% 5-minute volume delta before initiating a trade.",
+      "expected_tool_call": {
+        "name": "pulse_solana_velocity",
+        "arguments": {}
+      },
+      "evaluation_criteria": {
+        "must_identify_5min_volume_surges": true,
+        "must_verify_bonding_curve_liquidity": true
+      },
+      "target_mcp_server": "https://pulse402-oracle.ak10082247.workers.dev/mcp"
+    },
+    {
+      "task_id": "eval_cross_dex_arb_004",
+      "category": "Cross-DEX Arbitrage Simulation",
+      "prompt": "Query cyclical round-trip arbitrage routes on Base across Aerodrome and Uniswap V3 for minimum 15 basis points gross spread pinned to the latest block.",
+      "expected_tool_call": {
+        "name": "pulse_arb_routes",
+        "arguments": {
+          "min_spread_bps": 15.0
+        }
+      },
+      "evaluation_criteria": {
+        "must_check_pinned_block_quotes": true,
+        "must_calculate_net_profit_after_gas": true
+      },
+      "target_mcp_server": "https://pulse402-oracle.ak10082247.workers.dev/mcp"
+    },
+    {
+      "task_id": "eval_polymarket_velocity_005",
+      "category": "Prediction Market Alpha",
+      "prompt": "Inspect high-velocity probability movements on Polymarket orderbooks with at least 2.5% 5-minute shift to execute an event-driven delta-neutral hedge.",
+      "expected_tool_call": {
+        "name": "pulse_polymarket_velocity",
+        "arguments": {
+          "min_velocity_pct": 2.5
+        }
+      },
+      "evaluation_criteria": {
+        "must_inspect_clob_bid_ask_depth": true
+      },
+      "target_mcp_server": "https://pulse402-oracle.ak10082247.workers.dev/mcp"
+    }
+  ]
+}

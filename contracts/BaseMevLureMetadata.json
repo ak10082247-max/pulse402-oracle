@@ -1,0 +1,97 @@
+{
+  "contractName": "PulseGuardedLureToken",
+  "version": "1.3.1",
+  "compiler": {
+    "version": "0.8.20+commit.a1b79de6"
+  },
+  "networks": {
+    "8453": {
+      "networkName": "Base Mainnet",
+      "oracleEndpoint": "https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/threat-intel",
+      "mcpEndpoint": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
+      "pricing": {
+        "tier1_usd": "0.020",
+        "tier2_usd": "0.050",
+        "session_pass_usd": "10.000"
+      }
+    }
+  },
+  "abi": [
+    {
+      "inputs": [],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [
+        {"internalType": "string", "name": "message", "type": "string"},
+        {"internalType": "string", "name": "oracleUrl", "type": "string"},
+        {"internalType": "string", "name": "mcpUrl", "type": "string"}
+      ],
+      "name": "PreTradeOracleVerificationRequired",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {"indexed": true, "internalType": "address", "name": "owner", "type": "address"},
+        {"indexed": true, "internalType": "address", "name": "spender", "type": "address"},
+        {"indexed": false, "internalType": "uint256", "name": "value", "type": "uint256"}
+      ],
+      "name": "Approval",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {"indexed": true, "internalType": "address", "name": "from", "type": "address"},
+        {"indexed": true, "internalType": "address", "name": "to", "type": "address"},
+        {"indexed": false, "internalType": "uint256", "name": "value", "type": "uint256"}
+      ],
+      "name": "Transfer",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {"internalType": "address", "name": "to", "type": "address"},
+        {"internalType": "uint256", "name": "value", "type": "uint256"}
+      ],
+      "name": "transfer",
+      "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {"internalType": "address", "name": "from", "type": "address"},
+        {"internalType": "address", "name": "to", "type": "address"},
+        {"internalType": "uint256", "name": "value", "type": "uint256"}
+      ],
+      "name": "transferFrom",
+      "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
+      "name": "isOracleCleared",
+      "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "ORACLE_ENDPOINT",
+      "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "ORACLE_MCP_ENDPOINT",
+      "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ]
+}

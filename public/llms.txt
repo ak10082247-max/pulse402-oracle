@@ -4,31 +4,31 @@
 Pulse402 acquires read-only provider evidence in bounded background cycles and refreshes expired feeds on demand. Each paid response retains its original observation time and a 10-second TTL. Provider outages are reported before settlement.
 
 ## Endpoints
-- GET https://pulse402-oracle.onrender.com/v1/pulse/base-liquidity : Base liquidity, observed pool balance changes after warm-up, and actual pinned-block USDC quotes for $100 / $1k / $10k ($0.005 USDC / 5,000 atomic units).
-- GET https://pulse402-oracle.onrender.com/v1/pulse/threat-intel : Sampled GoPlus token-risk evidence and scoped deterministic text sanitization ($0.005 USDC / 5,000 atomic units).
-- GET https://pulse402-oracle.onrender.com/v1/pulse/polymarket-velocity : Sampled outcome probability movement over five minutes and real displayed orderbook depth ($0.01 USDC / 10,000 atomic units).
-- GET https://pulse402-oracle.onrender.com/v1/pulse/arb-routes : Distinct-pool round-trip quotes on Base with gross spread and explicit unproven execution costs ($0.01 USDC / 10,000 atomic units).
-- GET https://pulse402-oracle.onrender.com/v1/pulse/solana-velocity : Real-time Solana Pump.fun & Raydium token velocity, trending boosted tokens, 5m price change, volume, and liquidity depth ($0.01 USDC / 10,000 atomic units).
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/base-liquidity : Base liquidity, observed pool balance changes after warm-up, and actual pinned-block USDC quotes for $100 / $1k / $10k ($0.020 USDC / 20,000 atomic units).
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/threat-intel : Sampled GoPlus token-risk evidence and scoped deterministic text sanitization ($0.020 USDC / 20,000 atomic units).
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/polymarket-velocity : Sampled outcome probability movement over five minutes and real displayed orderbook depth ($0.050 USDC / 50,000 atomic units).
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/arb-routes : Distinct-pool round-trip quotes on Base with gross spread and explicit unproven execution costs ($0.050 USDC / 50,000 atomic units).
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/solana-velocity : Real-time Solana Pump.fun & Raydium token velocity, trending boosted tokens, 5m price change, volume, and liquidity depth ($0.050 USDC / 50,000 atomic units).
 
 ## Free Developer Previews
-- GET https://pulse402-oracle.onrender.com/v1/preview/base-liquidity
-- GET https://pulse402-oracle.onrender.com/v1/preview/polymarket-velocity
-- GET https://pulse402-oracle.onrender.com/v1/preview/threat-intel
-- GET https://pulse402-oracle.onrender.com/v1/preview/arb-routes
-- GET https://pulse402-oracle.onrender.com/v1/preview/solana-velocity
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/preview/base-liquidity
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/preview/polymarket-velocity
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/preview/threat-intel
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/preview/arb-routes
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/preview/solana-velocity
 
 ## MCP Server Endpoint
-- POST https://pulse402-oracle.onrender.com/mcp : Model Context Protocol JSON-RPC 2.0 HTTP endpoint; discovery is free and tool execution requires payment.
+- POST https://pulse402-oracle.ak10082247.workers.dev/mcp : Model Context Protocol JSON-RPC 2.0 HTTP endpoint; discovery is free and tool execution requires payment.
 
 ## Telemetry
-- GET https://pulse402-oracle.onrender.com/v1/telemetry/summary : Real-time metrics on 402 challenges served, preview calls, settlements, and active HFT passes.
+- GET https://pulse402-oracle.ak10082247.workers.dev/v1/telemetry/summary : Real-time metrics on 402 challenges served, preview calls, settlements, and active HFT passes.
 
 ## Pricing & x402 Micropayments
-- Tier 1 Feeds ($0.005 USDC / 5,000 atomic units): /v1/pulse/base-liquidity, /v1/pulse/threat-intel on Base (eip155:8453) or Solana (solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp).
-- Tier 2 Feeds ($0.01 USDC / 10,000 atomic units): /v1/pulse/polymarket-velocity, /v1/pulse/arb-routes, /v1/pulse/solana-velocity on Base or Solana.
+- Tier 1 Feeds ($0.020 USDC / 20,000 atomic units): /v1/pulse/base-liquidity, /v1/pulse/threat-intel on Base (eip155:8453) or Solana (solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp).
+- Tier 2 Feeds ($0.050 USDC / 50,000 atomic units): /v1/pulse/polymarket-velocity, /v1/pulse/arb-routes, /v1/pulse/solana-velocity on Base or Solana.
 - Payout Wallet: 0x80E0Ae84679b7f11bE171DaADd492FBECf628cd6
 - Solana Payout Wallet: 9wuMysgXwNhtQeqJgGByAiMYc4EjzZ5wUSmnjrrt3ffh
-- Prepay Session: POST https://pulse402-oracle.onrender.com/v1/pass/prepay ($5.00 USDC for 2,500 calls valid for seven days, effective $0.002/call rate — saves 60%-80% over per-call settlement and eliminates signing latency).
+- Prepay Session: POST https://pulse402-oracle.ak10082247.workers.dev/v1/pass/prepay ($10.00 USDC for 1,000 calls valid for seven days, effective $0.010/call rate — saves 50%-80% over per-call settlement and eliminates signing latency).
 - Free previews expose coverage summaries only. MCP discovery is free; tool execution uses the same payment flow as HTTP.
 - Purchased sessions use X-Pulse-Session and a unique Idempotency-Key per call. Reuse the same key and arguments to recover a response without another credit.
 - Retain the original payment authorization for recovery. A charged=unknown response requires reconciliation; do not sign a replacement payment.

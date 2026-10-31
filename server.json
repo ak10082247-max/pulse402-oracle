@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ak10082247-max/pulse402-oracle",
   "title": "Pulse402 Oracle",
-  "description": "Consumable x402 data oracle providing Base DEX liquidity ($0.005), Polymarket velocity ($0.01), threat intel ($0.005), and cross-DEX arb routes ($0.01) for AI agents.",
-  "version": "1.3.0",
+  "description": "Consumable dual-chain (Base & Solana) x402 V2 data oracle providing pre-trade Base DEX liquidity ($0.02), Solana Pump.fun/Raydium velocity ($0.05), Polymarket velocity ($0.05), GoPlus threat intel ($0.02), and cross-DEX arbitrage routes ($0.05) for AI trading agents.",
+  "version": "1.3.1",
   "websiteUrl": "https://pulse402-oracle.ak10082247.workers.dev",
   "repository": {
     "url": "https://github.com/ak10082247-max/pulse402-oracle",
