@@ -530,8 +530,39 @@ async def health_check():
     }
 
 @app.get("/robots.txt", response_class=PlainTextResponse)
-async def robots_txt():
+async def robots_txt(request: Request = None):
     return PlainTextResponse("User-agent: *\nAllow: /\n", media_type="text/plain; charset=utf-8")
+
+@app.get("/sitemap.xml")
+async def sitemap_xml(request: Request = None):
+    base_url = str(request.base_url).rstrip("/") if request else "https://pulse402-oracle.ak10082247.workers.dev"
+    urls = [
+        ("/", "1.0", "hourly"),
+        ("/skill.md", "0.9", "daily"),
+        ("/llms.txt", "0.9", "daily"),
+        ("/.well-known/x402.json", "0.9", "daily"),
+        ("/.well-known/mcp.json", "0.9", "daily"),
+        ("/.well-known/agent-card.json", "0.8", "daily"),
+        ("/openapi.json", "0.8", "daily"),
+        ("/v1/preview/base-liquidity", "0.8", "hourly"),
+        ("/v1/preview/threat-intel", "0.8", "hourly"),
+        ("/v1/preview/polymarket-velocity", "0.8", "hourly"),
+        ("/v1/preview/arb-routes", "0.8", "hourly"),
+        ("/v1/preview/solana-velocity", "0.8", "hourly"),
+        ("/v1/telemetry/summary", "0.7", "hourly"),
+        ("/about", "0.5", "weekly"),
+        ("/contact", "0.5", "weekly"),
+        ("/terms", "0.4", "monthly"),
+        ("/privacy", "0.4", "monthly"),
+    ]
+    xml_items = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    ]
+    for path, priority, freq in urls:
+        xml_items.append(f"  <url><loc>{base_url}{path}</loc><changefreq>{freq}</changefreq><priority>{priority}</priority></url>")
+    xml_items.append("</urlset>")
+    return Response("\n".join(xml_items), media_type="application/xml; charset=utf-8")
 
 REPOSITORY_URL = "https://github.com/ak10082247-max/pulse402-oracle"
 SECURITY_CONTACT_URL = REPOSITORY_URL + "/security/advisories/new"
