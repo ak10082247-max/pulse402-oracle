@@ -8,6 +8,8 @@
     "8453": {
       "networkName": "Base Mainnet",
       "contractAddress": "0xC1d50CdE7a17162D20492B707e566B67b877970f",
+      "uniswapV3PoolAddress": "0x498581ff718922c3f8e6a244956af099b2652b2b",
+      "poolCreationTx": "0x239c16c927604103660f844842b986b8efe13a7d2e45589943c6f274f144c48f",
       "sourcifyUrl": "https://sourcify.dev/#/lookup/0xC1d50CdE7a17162D20492B707e566B67b877970f",
       "basescanUrl": "https://basescan.org/address/0xC1d50CdE7a17162D20492B707e566B67b877970f",
       "oracleEndpoint": "https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/threat-intel",

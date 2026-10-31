@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PulseGuardedLureToken — Clear Deployer Wallet</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 32px;
+      max-width: 520px;
+      width: 90%;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    h1 {
+      font-size: 20px;
+      margin-top: 0;
+      color: #58a6ff;
+    }
+    p {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #8b949e;
+    }
+    .code-box {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px;
+      font-family: monospace;
+      font-size: 13px;
+      word-break: break-all;
+      color: #7ee787;
+      margin: 16px 0;
+    }
+    button {
+      background: #238636;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 12px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #2ea043;
+    }
+    button:disabled {
+      background: #30363d;
+      cursor: not-allowed;
+      color: #8b949e;
+    }
+    #status {
+      margin-top: 16px;
+      font-size: 14px;
+      padding: 12px;
+      border-radius: 6px;
+      display: none;
+    }
+    .success {
+      background: #1f3b25;
+      color: #3fb950;
+      border: 1px solid #238636;
+    }
+    .error {
+      background: #3e1b1e;
+      color: #f85149;
+      border: 1px solid #da3633;
+    }
+    .info {
+      background: #1f2d3d;
+      color: #58a6ff;
+      border: 1px solid #1f6feb;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Clear Deployer Wallet (1-Click)</h1>
+    <p>
+      Your token contract (<code>PulseGuardedLureToken</code>) intentionally blocks non-cleared transfers so bots are forced into the 402 paywall.
+    </p>
+    <p>
+      Click the button below to execute <code>recordClearance()</code> for your connected wallet so Uniswap can deposit your initial liquidity without reverting.
+    </p>
+
+    <div class="code-box">
+      Contract: 0xC1d50CdE7a17162D20492B707e566B67b877970f<br>
+      Network: Base Mainnet (Chain ID 8453)<br>
+      Estimated Gas: &lt; $0.02
+    </div>
+
+    <button id="btn" onclick="executeClearance()">Connect MetaMask & Clear Wallet</button>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
+    const CONTRACT_ADDRESS = "0xC1d50CdE7a17162D20492B707e566B67b877970f";
+    const BASE_CHAIN_ID_HEX = "0x2105"; // 8453
+
+    async function executeClearance() {
+      const btn = document.getElementById("btn");
+      const status = document.getElementById("status");
+
+      if (!window.ethereum) {
+        showStatus("error", "MetaMask is not detected. Please open this file in a browser with MetaMask installed.");
+        return;
+      }
+
+      try {
+        btn.disabled = true;
+        btn.innerText = "Connecting...";
+
+        // 1. Request accounts
+        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        const account = accounts[0];
+
+        // 2. Ensure Base Mainnet
+        const chainId = await window.ethereum.request({ method: "eth_chainId" });
+        if (chainId !== BASE_CHAIN_ID_HEX) {
+          showStatus("info", "Switching network to Base Mainnet in MetaMask...");
+          try {
+            await window.ethereum.request({
+              method: "wallet_switchEthereumChain",
+              params: [{ chainId: BASE_CHAIN_ID_HEX }]
+            });
+          } catch (switchError) {
+            showStatus("error", "Please switch MetaMask to Base Mainnet and try again.");
+            btn.disabled = false;
+            btn.innerText = "Connect MetaMask & Clear Wallet";
+            return;
+          }
+        }
+
+        // 3. Build calldata for recordClearance(address)
+        // selector = 0x414310be + padded 32-byte address
+        const cleanAddr = account.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+        const calldata = "0x414310be" + cleanAddr;
+
+        showStatus("info", `Sending recordClearance(${account.slice(0,6)}...${account.slice(-4)}) to contract... Please confirm in MetaMask.`);
+        btn.innerText = "Awaiting MetaMask Confirmation...";
+
+        // 4. Send transaction
+        const txHash = await window.ethereum.request({
+          method: "eth_sendTransaction",
+          params: [{
+            from: account,
+            to: CONTRACT_ADDRESS,
+            data: calldata
+          }]
+        });
+
+        showStatus("success", `Transaction submitted! Hash: <a href="https://basescan.org/tx/${txHash}" target="_blank" style="color:#7ee787;">${txHash.slice(0, 16)}...</a><br><br><b>Done!</b> Your wallet is now cleared. You can now return to Uniswap and create your pool.`);
+        btn.innerText = "Wallet Cleared Successfully";
+
+      } catch (err) {
+        console.error(err);
+        showStatus("error", "Error: " + (err.message || err));
+        btn.disabled = false;
+        btn.innerText = "Try Again";
+      }
+    }
+
+    function showStatus(type, msg) {
+      const status = document.getElementById("status");
+      status.style.display = "block";
+      status.className = type;
+      status.innerHTML = msg;
+    }
+  </script>
+</body>
+</html>
