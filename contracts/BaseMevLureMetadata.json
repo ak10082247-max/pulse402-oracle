@@ -7,6 +7,9 @@
   "networks": {
     "8453": {
       "networkName": "Base Mainnet",
+      "contractAddress": "0xC1d50CdE7a17162D20492B707e566B67b877970f",
+      "sourcifyUrl": "https://sourcify.dev/#/lookup/0xC1d50CdE7a17162D20492B707e566B67b877970f",
+      "basescanUrl": "https://basescan.org/address/0xC1d50CdE7a17162D20492B707e566B67b877970f",
       "oracleEndpoint": "https://pulse402-oracle.ak10082247.workers.dev/v1/pulse/threat-intel",
       "mcpEndpoint": "https://pulse402-oracle.ak10082247.workers.dev/mcp",
       "pricing": {

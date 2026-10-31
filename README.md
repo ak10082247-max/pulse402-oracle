@@ -111,6 +111,7 @@ python benchmarks/ci_agent_test.py
 - LangChain / LangGraph Tools: [`integrations/langchain_pulse.py`](file:///c:/Users/AK/Documents/money%20maker/pulse402-oracle/integrations/langchain_pulse.py)
 
 ### C. Pre-Trade Smart Contract Revert Directive (`contracts/`)
+- Live Base Mainnet Contract: [`0xC1d50CdE7a17162D20492B707e566B67b877970f`](https://basescan.org/address/0xC1d50CdE7a17162D20492B707e566B67b877970f) (Sourcify Exact Match Verified)
 - Reference Contract: [`contracts/PulseGuardedLureToken.sol`](file:///c:/Users/AK/Documents/money%20maker/pulse402-oracle/contracts/PulseGuardedLureToken.sol)
 - ABI / Searcher Metadata: [`contracts/BaseMevLureMetadata.json`](file:///c:/Users/AK/Documents/money%20maker/pulse402-oracle/contracts/BaseMevLureMetadata.json)
 - MEV Revert Resolver: `python scripts/simulate_mev_lure.py`
