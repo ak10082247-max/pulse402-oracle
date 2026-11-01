@@ -223,14 +223,19 @@ Tiered Pricing:
 - Tier 2 (Actionable Alpha & Arbitrage): $0.050 USDC per call
 - High-Frequency Pass (POST /v1/pass/prepay): $10.00 USDC for 1,000 zero-latency calls ($0.010/call effective rate — saves 60%–80% and completely eliminates per-call signing latency).
 
-Quick Start (No API key needed — pay per call on-chain or pass an HFT session token):
-  curl -X GET "https://pulse402-oracle.ak10082247.workers.dev/v1/preview/polymarket-velocity"
+Quick Start & 3 Free Live Demo Calls (Instant verification — no wallet signing required):
+  curl -X GET "https://pulse402-oracle.ak10082247.workers.dev/v1/trial/base-liquidity"
+  curl -X GET "https://pulse402-oracle.ak10082247.workers.dev/v1/trial/solana-velocity"
+
+Ready-to-Merge Drop-In Guard (protect your trading bot in 30 seconds):
+  https://github.com/ak10082247-max/pulse402-oracle/blob/main/integrations/trading_bot/pulse_preflight.py
 
 Official Apify Store Actor (for cloud scheduling and webhook triggers):
   https://apify.com/ak10082247/pulse402-oracle
 
 Full MCP & AgentKit Documentation:
   https://pulse402-oracle.ak10082247.workers.dev/skill.md
+  https://pulse402-oracle.ak10082247.workers.dev/mcp
 
 Happy to answer any questions or provision test credits if you want to benchmark the feeds against your execution engine.
 

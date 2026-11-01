@@ -48,6 +48,13 @@
     "repo": "quartzsprint0dbm3nh/how-to-create-uniswap-arbitrage-bot-swap-routes",
     "status": "sent"
   },
+  "cull.pass6i@icloud.com": {
+    "contacted_at": 1793545183,
+    "keyword": "base arbitrage",
+    "name": "StarEngineer",
+    "repo": "Brave-coralposta2174/how-to-create-ethereum-arbitrage-bot-wallet-setup",
+    "status": "dry_run"
+  },
   "damir.kurecic@ecothink.me": {
     "contacted_at": 1793535331,
     "keyword": "polymarket bot",
@@ -146,6 +153,13 @@
     "repo": "nusantaraaji40-arch/trading-bot",
     "status": "sent"
   },
+  "parkyucheol@gmail.com": {
+    "contacted_at": 1793545183,
+    "keyword": "polymarket agent",
+    "name": "Yucheol Park",
+    "repo": "parkyucheol-del/alphapipeline",
+    "status": "dry_run"
+  },
   "photon_fuel_55@icloud.com": {
     "contacted_at": 1793403074,
     "keyword": "base arbitrage",
@@ -200,6 +214,13 @@
     "keyword": "polymarket agent",
     "name": "Renato",
     "repo": "tradewr333-lgtm/degenscan-intel",
+    "status": "dry_run"
+  },
+  "traviswarren27@edu.medicichoir.org": {
+    "contacted_at": 1793545183,
+    "keyword": "base arbitrage",
+    "name": "WraithWarrior",
+    "repo": "loyalcog479207/how-to-prepare-arbitrage-bot-execution-parameters",
     "status": "dry_run"
   }
 }

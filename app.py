@@ -492,6 +492,48 @@ def preview_payload(feed_name):
         "refresh_mode": "on_demand_paced" if feed_name in BACKGROUND_MIN_INTERVAL_SECONDS else "background"},
         "notice": "Live records require a verified x402 payment or a purchased session credit."}
 
+_TRIAL_CALLS = {}
+_TRIAL_MAX_FREE = 3
+
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+def check_and_use_trial(ip: str) -> tuple[bool, int]:
+    now = time.time()
+    entry = _TRIAL_CALLS.get(ip)
+    if entry is None or now - entry.get("reset_at", 0) > 86400:
+        _TRIAL_CALLS[ip] = {"count": 1, "reset_at": now}
+        return True, _TRIAL_MAX_FREE - 1
+    if entry["count"] < _TRIAL_MAX_FREE:
+        entry["count"] += 1
+        return True, _TRIAL_MAX_FREE - entry["count"]
+    return False, 0
+
+@app.get("/v1/trial/{feed_name}")
+@app.get("/v1/demo/{feed_name}")
+async def get_trial_feed(request: Request, feed_name: str):
+    name = feed_name.replace("_", "-")
+    if name not in FEED_TOOL_MAP.values():
+        raise payments.PaymentError("UNKNOWN_FEED", 404)
+    ip = get_client_ip(request)
+    allowed, remaining = check_and_use_trial(ip)
+    amount = FEED_AMOUNTS.get(name, TIER1_AMOUNT_MICRO)
+    if not allowed:
+        return build_bazaar_402_challenge(f"/v1/pulse/{name}", amount=amount)
+    args = feed_arguments(name, dict(request.query_params), query=True)
+    data = await acquire_feed(name, args)
+    headers = {
+        "Cache-Control": "no-store, max-age=0",
+        "X-Pulse-Oracle": "Pulse402",
+        "X-Pulse-Trial": "active",
+        "X-Pulse-Trial-Remaining": str(remaining),
+        "X-Pulse-Paid-Endpoint": f"/v1/pulse/{name}",
+    }
+    return JSONResponse(content=data, headers=headers)
+
 # ==============================================================================
 # PUBLIC DISCOVERY ENDPOINTS
 # ==============================================================================
