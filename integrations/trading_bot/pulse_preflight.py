@@ -31,18 +31,34 @@ class PulsePreflightGuard:
         self.timeout = timeout
 
     def _fetch_feed(self, feed_name: str, params: dict = None) -> dict:
-        url = f"{PULSE_EDGE_ORIGIN}/v1/pulse/{feed_name}"
-        if params:
-            qs = "&".join(f"{k}={v}" for k, v in params.items())
-            url = f"{url}?{qs}"
-            
         headers = {
             "User-Agent": "Pulse402-TradingBot-Guard/1.3.1",
             "Accept": "application/json"
         }
         if self.session_token:
             headers["X-Pulse-Session"] = self.session_token
-            
+
+        # 1. Try Live Trial Endpoint if no paid session token is configured (3 free calls/day)
+        if not self.session_token:
+            trial_url = f"{PULSE_EDGE_ORIGIN}/v1/trial/{feed_name}"
+            if params:
+                qs = "&".join(f"{k}={v}" for k, v in params.items())
+                trial_url = f"{trial_url}?{qs}"
+            try:
+                req = urllib.request.Request(trial_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    res_json = json.loads(resp.read().decode("utf-8"))
+                    if res_json and res_json.get("status") == "ok":
+                        return res_json.get("data", res_json)
+            except Exception:
+                pass
+
+        # 2. Try Standard Paid Route
+        url = f"{PULSE_EDGE_ORIGIN}/v1/pulse/{feed_name}"
+        if params:
+            qs = "&".join(f"{k}={v}" for k, v in params.items())
+            url = f"{url}?{qs}"
+
         req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -63,6 +79,49 @@ class PulsePreflightGuard:
         except Exception as e:
             logger.error(f"Pulse402 connection error: {e}")
             return {}
+
+    def get_polymarket_mover(self, market_slug: str = None) -> dict:
+        """
+        Returns real-time velocity metrics for Polymarket.
+        If market_slug is provided, searches for the matching market.
+        """
+        data = self._fetch_feed("polymarket-velocity")
+        if not data:
+            return {}
+        
+        if isinstance(data, list):
+            sample = data
+        elif isinstance(data, dict):
+            inner = data.get("data")
+            if isinstance(inner, list):
+                sample = inner
+            elif isinstance(inner, dict):
+                sample = inner.get("top_sample", [])
+            else:
+                sample = data.get("top_sample", [])
+        else:
+            sample = []
+
+        if market_slug:
+            for item in sample:
+                if market_slug.lower() in item.get("market_slug", "").lower() or market_slug.lower() in item.get("slug", "").lower():
+                    return item
+        return sample[0] if sample else {}
+
+    def assert_polymarket_trade_safe(self, market_slug: str = None, max_surge_pct: float = 25.0) -> bool:
+        """
+        Guards against placing trades into extreme volatility or rapid market reversals.
+        Returns False if 5-minute price delta exceeds max_surge_pct.
+        """
+        mover = self.get_polymarket_mover(market_slug)
+        if not mover:
+            return True  # Fail open if oracle unavailable
+            
+        surge = abs(float(mover.get("velocity_5m_pct", 0.0)))
+        if surge > max_surge_pct:
+            logger.warning(f"Rejecting trade on {market_slug}: 5m surge {surge:.1f}% exceeds max threshold {max_surge_pct}%")
+            return False
+        return True
 
     def assert_base_swap_safe(self, symbol: str, swap_amount_usd: float = 1000.0) -> bool:
         """

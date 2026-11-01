@@ -407,7 +407,10 @@ async def start_poller_loop(poll_interval_seconds=8):
             if pending is not None:
                 if not pending.done():
                     pending.cancel()
-                await asyncio.gather(pending, return_exceptions=True)
+                try:
+                    await asyncio.gather(pending, return_exceptions=True)
+                except RuntimeError:
+                    pass
                 if _REFRESH_TASK is pending:
                     _REFRESH_TASK = None
             if _POLL_CLIENT is client:
