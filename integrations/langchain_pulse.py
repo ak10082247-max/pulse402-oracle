@@ -13,12 +13,21 @@ import urllib.error
 EDGE_BASE = "https://pulse402-oracle.ak10082247.workers.dev"
 
 def _query_pulse(feed: str, params: dict = None) -> str:
-    url = f"{EDGE_BASE}/v1/preview/{feed}"
-    if params:
-        qs = "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
-        if qs:
-            url = f"{url}?{qs}"
-    req = urllib.request.Request(url, headers={"User-Agent": "LangChain-Pulse402-Tool/1.3.1"})
+    headers = {"User-Agent": "LangChain-Pulse402-Tool/1.3.1"}
+    qs = "&".join(f"{k}={v}" for k, v in params.items() if v is not None) if params else ""
+    
+    # 1. Try Live Trial Endpoint (Free 3 calls/day, zero auth, live data)
+    trial_url = f"{EDGE_BASE}/v1/trial/{feed}" + (f"?{qs}" if qs else "")
+    try:
+        req = urllib.request.Request(trial_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            return resp.read().decode("utf-8")
+    except Exception:
+        pass
+
+    # 2. Fallback to Zero-Auth Preview Endpoint
+    preview_url = f"{EDGE_BASE}/v1/preview/{feed}" + (f"?{qs}" if qs else "")
+    req = urllib.request.Request(preview_url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=5.0) as resp:
             return resp.read().decode("utf-8")
