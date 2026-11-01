@@ -896,12 +896,53 @@ async def get_threat_intel(request: Request):
 @app.post("/v1/pulse/threat-intel/sanitize")
 async def post_threat_sanitize(request: Request):
     try:
-        body = await read_json_object(request)
-        if set(body) - {"content", "strict_mode"} or not isinstance(body.get("content"), str) or not 1 <= len(body["content"]) <= 50000 or type(body.get("strict_mode", True)) is not bool:
+        raw_sig = payments.payment_header(request.headers)
+        session = request.headers.get("X-Pulse-Session")
+        raw_bytes = bytearray()
+        async for chunk in request.stream():
+            raw_bytes.extend(chunk)
+            if len(raw_bytes) > 1_048_576:
+                raise payments.PaymentError("REQUEST_TOO_LARGE", 413)
+
+        body = {}
+        if raw_bytes and raw_bytes.strip() != b"":
+            def unique(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("Duplicate JSON field")
+                    result[key] = value
+                return result
+            try:
+                body = json.loads(raw_bytes, object_pairs_hook=unique, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+                if not isinstance(body, dict):
+                    raise ValueError()
+            except Exception:
+                raise payments.PaymentError("INVALID_JSON_OBJECT", 400)
+
+        if not raw_sig and not session:
+            return build_bazaar_402_challenge("/v1/pulse/threat-intel/sanitize", amount=TIER1_AMOUNT_MICRO)
+
+        content = body.get("text_to_sanitize") if "text_to_sanitize" in body else body.get("content")
+        if content is None and "text" in body:
+            content = body.get("text")
+        if content is None or not isinstance(content, str) or not 1 <= len(content) <= 50000:
             raise payments.PaymentError("INVALID_SANITIZER_INPUT", 400)
+
+        strict_mode = body.get("strict_mode", True)
+        if type(strict_mode) is not bool:
+            raise payments.PaymentError("INVALID_SANITIZER_INPUT", 400)
+
+        allowed_keys = {"content", "text_to_sanitize", "text", "strict_mode"}
+        if set(body) - allowed_keys:
+            raise payments.PaymentError("INVALID_SANITIZER_INPUT", 400)
+
+        bound_body = {"content": content, "strict_mode": strict_mode}
+
         async def acquire():
-            return {"status": "ok", "timestamp_ms": int(time.time() * 1000), "sanitization": sanitize_untrusted_text(body["content"], strict_mode=body.get("strict_mode", True))}
-        data, headers, challenge = await paid_delivery(request, "/v1/pulse/threat-intel/sanitize", body, acquire, amount=TIER1_AMOUNT_MICRO)
+            return {"status": "ok", "timestamp_ms": int(time.time() * 1000), "sanitization": sanitize_untrusted_text(content, strict_mode=strict_mode)}
+
+        data, headers, challenge = await paid_delivery(request, "/v1/pulse/threat-intel/sanitize", bound_body, acquire, amount=TIER1_AMOUNT_MICRO)
         return challenge if challenge is not None else JSONResponse(data, headers=headers)
     except payments.PaymentError as error:
         return payment_failure(error)
@@ -1024,14 +1065,50 @@ MCP_TOOLS = [
     }
 ]
 
+@app.head("/mcp")
+@app.head("/mcp/")
+async def mcp_head():
+    return Response(status_code=200, headers={"Content-Type": "application/json", "X-Pulse-Oracle": "Pulse402"})
+
+
+@app.get("/mcp")
+@app.get("/mcp/")
+async def mcp_get():
+    return {"name": SERVICE_NAME, "tools": MCP_TOOLS, "endpoint": "/mcp"}
+
+
 @app.post("/mcp")
 @app.post("/mcp/")
 async def mcp_rpc(request: Request):
     req_id = None
     try:
-        body = await read_json_object(request)
-        req_id, method, params = body.get("id"), body.get("method"), body.get("params", {})
-        if body.get("jsonrpc") != "2.0" or not isinstance(params, dict):
+        raw_bytes = bytearray()
+        async for chunk in request.stream():
+            raw_bytes.extend(chunk)
+            if len(raw_bytes) > 1_048_576:
+                raise payments.PaymentError("REQUEST_TOO_LARGE", 413)
+        if not raw_bytes or raw_bytes.strip() == b"":
+            return JSONResponse({"jsonrpc": "2.0", "result": {"name": SERVICE_NAME, "version": SERVICE_VERSION, "endpoint": "/mcp", "tools": MCP_TOOLS}})
+
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("Duplicate JSON field")
+                result[key] = value
+            return result
+        try:
+            body = json.loads(raw_bytes, object_pairs_hook=unique, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+            if not isinstance(body, dict):
+                raise ValueError()
+        except Exception:
+            raise payments.PaymentError("INVALID_JSON_RPC", 400)
+
+        req_id, method = body.get("id"), body.get("method")
+        params = body.get("params")
+        if params is None or not isinstance(params, dict):
+            params = {}
+        if body.get("jsonrpc") != "2.0":
             raise payments.PaymentError("INVALID_JSON_RPC", 400)
         proto_hdr = request.headers.get("MCP-Protocol-Version")
         if method == "initialize":
@@ -1072,12 +1149,6 @@ async def mcp_rpc(request: Request):
         return JSONResponse({"jsonrpc": "2.0", "id": req_id, "result": result})
     except payments.PaymentError as error:
         return payment_failure(error)
-
-
-@app.get("/mcp")
-@app.get("/mcp/")
-async def mcp_get():
-    return {"name": SERVICE_NAME, "tools": MCP_TOOLS, "endpoint": "/mcp"}
 
 
 @app.get("/version")
