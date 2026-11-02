@@ -1,0 +1,53 @@
+{
+  "starting_balance_usd": 500.0,
+  "current_balance_usd": 502.74,
+  "total_sim_trades": 4,
+  "profitable_trades": 4,
+  "cumulative_pnl_usd": 2.74,
+  "trades": [
+    {
+      "id": "sim-1793644856331",
+      "timestamp": "2026-11-02T18:40:56.331871+00:00",
+      "venue": "Polymarket",
+      "target": "2026 Balance of Power: R Senate, R House",
+      "size_usd": 25.0,
+      "estimated_edge_pct": 3.63,
+      "simulated_pnl_usd": 0.7825,
+      "resulting_balance_usd": 500.78,
+      "status": "simulated_filled"
+    },
+    {
+      "id": "sim-1793644856336",
+      "timestamp": "2026-11-02T18:40:56.336864+00:00",
+      "venue": "Polymarket",
+      "target": "Will the Republican Party control the Senate after the 2026 Midterm elections?",
+      "size_usd": 25.04,
+      "estimated_edge_pct": 4.35,
+      "simulated_pnl_usd": 0.964,
+      "resulting_balance_usd": 501.74,
+      "status": "simulated_filled"
+    },
+    {
+      "id": "sim-1793644856744",
+      "timestamp": "2026-11-02T18:40:56.744894+00:00",
+      "venue": "Solana (pumpfun)",
+      "target": "SOLANA1s",
+      "size_usd": 25.09,
+      "estimated_edge_pct": 2.5,
+      "simulated_pnl_usd": 0.5018,
+      "resulting_balance_usd": 502.24,
+      "status": "simulated_filled"
+    },
+    {
+      "id": "sim-1793644856747",
+      "timestamp": "2026-11-02T18:40:56.747069+00:00",
+      "venue": "Solana (pumpfun)",
+      "target": "sf1",
+      "size_usd": 25.11,
+      "estimated_edge_pct": 2.5,
+      "simulated_pnl_usd": 0.5022,
+      "resulting_balance_usd": 502.74,
+      "status": "simulated_filled"
+    }
+  ]
+}
