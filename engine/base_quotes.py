@@ -172,6 +172,7 @@ class BaseQuotes:
                 [
                     self.rpc_url,
                     "https://base-rpc.publicnode.com",
+                    "https://base.llamarpc.com",
                     "https://mainnet.base.org",
                 ]
             )

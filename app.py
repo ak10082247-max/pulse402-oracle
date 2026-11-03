@@ -365,6 +365,11 @@ def payment_failure(error):
     return JSONResponse(status_code=error.status, content={"error": error.code, "charged": error.charged,
         "retry": "Retain the original authorization and identical request. Do not create a replacement payment while settlement is unknown." if error.charged == "unknown" else None}, headers={"Cache-Control": "no-store"})
 
+@app.exception_handler(payments.PaymentError)
+async def payment_error_handler(request: Request, exc: payments.PaymentError):
+    return payment_failure(exc)
+
+
 
 async def read_json_object(request):
     raw = bytearray()
@@ -513,26 +518,54 @@ def check_and_use_trial(ip: str) -> tuple[bool, int]:
     return False, 0
 
 @app.get("/v1/trial/{feed_name}")
+@app.post("/v1/trial/{feed_name}")
 @app.get("/v1/demo/{feed_name}")
+@app.post("/v1/demo/{feed_name}")
 async def get_trial_feed(request: Request, feed_name: str):
-    name = feed_name.replace("_", "-")
-    if name not in FEED_TOOL_MAP.values():
-        raise payments.PaymentError("UNKNOWN_FEED", 404)
-    ip = get_client_ip(request)
-    allowed, remaining = check_and_use_trial(ip)
-    amount = FEED_AMOUNTS.get(name, TIER1_AMOUNT_MICRO)
-    if not allowed:
-        return build_bazaar_402_challenge(f"/v1/pulse/{name}", amount=amount)
-    args = feed_arguments(name, dict(request.query_params), query=True)
-    data = await acquire_feed(name, args)
-    headers = {
-        "Cache-Control": "no-store, max-age=0",
-        "X-Pulse-Oracle": "Pulse402",
-        "X-Pulse-Trial": "active",
-        "X-Pulse-Trial-Remaining": str(remaining),
-        "X-Pulse-Paid-Endpoint": f"/v1/pulse/{name}",
-    }
-    return JSONResponse(content=data, headers=headers)
+    try:
+        raw_name = feed_name.strip().replace("{", "").replace("}", "").replace("%7B", "").replace("%7D", "")
+        name = raw_name.replace("_", "-")
+        valid_feeds = sorted(list(set(FEED_TOOL_MAP.values())))
+        if not name or name not in valid_feeds:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": "UNKNOWN_FEED",
+                    "message": f"Feed '{feed_name}' is not recognized. Please query one of the valid trial feeds.",
+                    "valid_feeds": valid_feeds,
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+        ip = get_client_ip(request)
+        allowed, remaining = check_and_use_trial(ip)
+        amount = FEED_AMOUNTS.get(name, TIER1_AMOUNT_MICRO)
+        if not allowed:
+            return build_bazaar_402_challenge(f"/v1/pulse/{name}", amount=amount)
+        
+        query_dict = dict(request.query_params)
+        body_dict = {}
+        if request.method == "POST":
+            try:
+                body_bytes = await request.body()
+                if body_bytes and body_bytes.strip():
+                    body_obj = json.loads(body_bytes)
+                    if isinstance(body_obj, dict):
+                        body_dict = body_obj
+            except Exception:
+                pass
+        merged_args = {**query_dict, **body_dict}
+        args = feed_arguments(name, merged_args, query=True)
+        data = await acquire_feed(name, args)
+        headers = {
+            "Cache-Control": "no-store, max-age=0",
+            "X-Pulse-Oracle": "Pulse402",
+            "X-Pulse-Trial": "active",
+            "X-Pulse-Trial-Remaining": str(remaining),
+            "X-Pulse-Paid-Endpoint": f"/v1/pulse/{name}",
+        }
+        return JSONResponse(content=data, headers=headers)
+    except payments.PaymentError as error:
+        return payment_failure(error)
 
 # ==============================================================================
 # PUBLIC DISCOVERY ENDPOINTS
@@ -1145,6 +1178,9 @@ async def mcp_rpc(request: Request):
                 raise ValueError()
         except Exception:
             raise payments.PaymentError("INVALID_JSON_RPC", 400)
+
+        if not body:
+            return JSONResponse({"jsonrpc": "2.0", "result": {"name": SERVICE_NAME, "version": SERVICE_VERSION, "endpoint": "/mcp", "tools": MCP_TOOLS}})
 
         req_id, method = body.get("id"), body.get("method")
         params = body.get("params")
