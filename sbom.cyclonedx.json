@@ -1,0 +1,298 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:4042e03e-1f1e-48c6-b9ea-576920e6b5d5",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-03T00:07:00.637836+00:00",
+    "tools": [
+      {
+        "vendor": "Pulse402 Security",
+        "name": "pulse-sbom-generator",
+        "version": "1.3.1"
+      }
+    ],
+    "authors": [
+      {
+        "name": "AK | Kurox",
+        "email": "armkhan18@gmail.com"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:github/ak10082247-max/pulse402-oracle@1.3.1",
+      "name": "pulse402-oracle",
+      "version": "1.3.1",
+      "description": "Autonomous Dual-Chain (Base + Solana) x402 V2 Oracle Network & MCP Gateway",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:github/ak10082247-max/pulse402-oracle@1.3.1",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/ak10082247-max/pulse402-oracle"
+        },
+        {
+          "type": "website",
+          "url": "https://pulse402-oracle.ak10082247.workers.dev"
+        },
+        {
+          "type": "documentation",
+          "url": "https://pulse402-oracle.ak10082247.workers.dev/skill.md"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/fastapi@0.115.6",
+      "name": "fastapi",
+      "version": "0.115.6",
+      "purl": "pkg:pypi/fastapi@0.115.6",
+      "scope": "required",
+      "description": "Python runtime dependency (fastapi==0.115.6)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/uvicorn@0.34.0",
+      "name": "uvicorn",
+      "version": "0.34.0",
+      "purl": "pkg:pypi/uvicorn@0.34.0",
+      "scope": "required",
+      "description": "Python runtime dependency (uvicorn[standard]==0.34.0)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/httpx@0.28.1",
+      "name": "httpx",
+      "version": "0.28.1",
+      "purl": "pkg:pypi/httpx@0.28.1",
+      "scope": "required",
+      "description": "Python runtime dependency (httpx==0.28.1)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/pydantic@2.10.4",
+      "name": "pydantic",
+      "version": "2.10.4",
+      "purl": "pkg:pypi/pydantic@2.10.4",
+      "scope": "required",
+      "description": "Python runtime dependency (pydantic==2.10.4)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/apify@2.7.0",
+      "name": "apify",
+      "version": "2.7.0",
+      "purl": "pkg:pypi/apify@2.7.0",
+      "scope": "required",
+      "description": "Python runtime dependency (apify==2.7.0)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/apify-client@1.12.2",
+      "name": "apify-client",
+      "version": "1.12.2",
+      "purl": "pkg:pypi/apify-client@1.12.2",
+      "scope": "required",
+      "description": "Python runtime dependency (apify-client==1.12.2)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/apify-shared@1.5.0",
+      "name": "apify-shared",
+      "version": "1.5.0",
+      "purl": "pkg:pypi/apify-shared@1.5.0",
+      "scope": "required",
+      "description": "Python runtime dependency (apify-shared==1.5.0)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/crawlee@0.6.12",
+      "name": "crawlee",
+      "version": "0.6.12",
+      "purl": "pkg:pypi/crawlee@0.6.12",
+      "scope": "required",
+      "description": "Python runtime dependency (crawlee==0.6.12)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/browserforge@1.2.3",
+      "name": "browserforge",
+      "version": "1.2.3",
+      "purl": "pkg:pypi/browserforge@1.2.3",
+      "scope": "required",
+      "description": "Python runtime dependency (browserforge==1.2.3)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/eth-account@0.13",
+      "name": "eth-account",
+      "version": "0.13",
+      "purl": "pkg:pypi/eth-account@0.13",
+      "scope": "required",
+      "description": "Python runtime dependency (eth-account>=0.13,<0.14)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/eth-abi@5",
+      "name": "eth-abi",
+      "version": "5",
+      "purl": "pkg:pypi/eth-abi@5",
+      "scope": "required",
+      "description": "Python runtime dependency (eth-abi>=5,<6)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/eth-utils@2",
+      "name": "eth-utils",
+      "version": "2",
+      "purl": "pkg:pypi/eth-utils@2",
+      "scope": "required",
+      "description": "Python runtime dependency (eth-utils>=2,<7)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/cryptography@42",
+      "name": "cryptography",
+      "version": "42",
+      "purl": "pkg:pypi/cryptography@42",
+      "scope": "required",
+      "description": "Python runtime dependency (cryptography>=42)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/wrangler@4.154.0",
+      "name": "wrangler",
+      "version": "4.154.0",
+      "purl": "pkg:npm/wrangler@4.154.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:github/ak10082247-max/pulse402-oracle@1.3.1",
+      "dependsOn": [
+        "pkg:pypi/fastapi@0.115.6",
+        "pkg:pypi/uvicorn@0.34.0",
+        "pkg:pypi/httpx@0.28.1",
+        "pkg:pypi/pydantic@2.10.4",
+        "pkg:pypi/apify@2.7.0",
+        "pkg:pypi/apify-client@1.12.2",
+        "pkg:pypi/apify-shared@1.5.0",
+        "pkg:pypi/crawlee@0.6.12",
+        "pkg:pypi/browserforge@1.2.3",
+        "pkg:pypi/eth-account@0.13",
+        "pkg:pypi/eth-abi@5",
+        "pkg:pypi/eth-utils@2",
+        "pkg:pypi/cryptography@42",
+        "pkg:npm/wrangler@4.154.0"
+      ]
+    }
+  ]
+}
