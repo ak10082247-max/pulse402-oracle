@@ -1,9 +1,9 @@
 {
   "starting_balance_usd": 500.0,
-  "current_balance_usd": 508.07,
-  "total_sim_trades": 10,
-  "profitable_trades": 10,
-  "cumulative_pnl_usd": 8.07,
+  "current_balance_usd": 509.45,
+  "total_sim_trades": 12,
+  "profitable_trades": 12,
+  "cumulative_pnl_usd": 9.45,
   "trades": [
     {
       "id": "sim-1793644856331",
@@ -113,6 +113,28 @@
       "estimated_edge_pct": 2.77,
       "simulated_pnl_usd": 0.5759,
       "resulting_balance_usd": 508.07,
+      "status": "simulated_filled"
+    },
+    {
+      "id": "sim-1793722475513",
+      "timestamp": "2026-11-03T16:14:35.513790+00:00",
+      "venue": "Polymarket",
+      "target": "2026 Balance of Power: R Senate, R House",
+      "size_usd": 25.4,
+      "estimated_edge_pct": 4.3,
+      "simulated_pnl_usd": 0.9652,
+      "resulting_balance_usd": 509.04,
+      "status": "simulated_filled"
+    },
+    {
+      "id": "sim-1793722475514",
+      "timestamp": "2026-11-03T16:14:35.514369+00:00",
+      "venue": "Polymarket",
+      "target": "Will the Democratic Party control the House after the 2026 Midterm elections?",
+      "size_usd": 25.45,
+      "estimated_edge_pct": 2.13,
+      "simulated_pnl_usd": 0.4148,
+      "resulting_balance_usd": 509.45,
       "status": "simulated_filled"
     }
   ]
