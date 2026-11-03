@@ -2,10 +2,10 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.5.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:884b51a4-63c7-48e3-a854-c829b0f469db",
+  "serialNumber": "urn:uuid:5cd86a85-6085-4c18-8a5b-0bfc43360702",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-03T00:09:01.182898+00:00",
+    "timestamp": "2026-11-03T00:22:11.781082+00:00",
     "tools": [
       {
         "vendor": "Pulse402 Security",
