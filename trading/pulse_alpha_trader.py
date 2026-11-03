@@ -26,7 +26,12 @@ import sys
 import time
 import urllib.request
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from integrations.trading_bot.pulse_preflight import PulsePreflightGuard
+
 
 logging.basicConfig(
     level=logging.INFO,

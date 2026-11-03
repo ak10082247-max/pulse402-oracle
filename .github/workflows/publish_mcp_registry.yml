@@ -1,0 +1,47 @@
+name: Publish to Official MCP Registry
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    name: Validate and Publish to MCP Registry
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Required for GitHub OIDC authentication
+      contents: read
+
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.7
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download mcp-publisher
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/${archive}"
+          echo "Downloading mcp-publisher from ${url}..."
+          curl --fail --location --silent --show-error --output "${archive}" "${url}"
+          tar xzf "${archive}" mcp-publisher
+          chmod +x mcp-publisher
+          rm -f "${archive}"
+
+      - name: Validate server.json against Official Registry
+        run: |
+          ./mcp-publisher validate server.json
+
+      - name: Authenticate with GitHub OIDC
+        run: |
+          ./mcp-publisher login github-oidc
+
+      - name: Publish server.json to Official MCP Registry
+        run: |
+          ./mcp-publisher publish server.json

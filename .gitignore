@@ -48,3 +48,5 @@ Thumbs.db
 .burner*
 scripts/*.json
 scripts/settle_base_burner.py
+mcp-publisher*
+
