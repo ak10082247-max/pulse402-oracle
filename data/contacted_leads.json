@@ -118,6 +118,13 @@
     "repo": "bh13731/polymarket-dashboard",
     "status": "sent"
   },
+  "bundlesnout@mail.grokbot.com": {
+    "contacted_at": 1793833151,
+    "keyword": "pump fun bot",
+    "name": "bundlesnout",
+    "repo": "bundlesnout/bundle-snout",
+    "status": "sent"
+  },
   "bunts-wall-9q@icloud.com": {
     "contacted_at": 1793412278,
     "keyword": "base arbitrage",
@@ -153,12 +160,26 @@
     "repo": "kurecicd/polymarket-bot",
     "status": "sent"
   },
+  "denniswells2019@gmail.com": {
+    "contacted_at": 1793833148,
+    "keyword": "pump fun bot",
+    "name": "Dennis Wells",
+    "repo": "DeeKalshiWay/solana-pumpfun-bot",
+    "status": "sent"
+  },
   "deserts.curry.9e@icloud.com": {
     "contacted_at": 1793408791,
     "keyword": "base arbitrage",
     "name": "SnowChampion",
     "repo": "tundraharborup7czmp/how-to-create-arbitrage-bot-deployment-steps",
     "status": "dry_run"
+  },
+  "devil@bowtieddevil.com": {
+    "contacted_at": 1793833139,
+    "keyword": "aerodrome bot",
+    "name": "BowTiedDevil",
+    "repo": "BowTiedDevil/degenbot",
+    "status": "sent"
   },
   "devotee.spruces8a@icloud.com": {
     "contacted_at": 1793664617,
@@ -200,6 +221,13 @@
     "keyword": "base arbitrage",
     "name": "CodeGuardian394",
     "repo": "Badgerprairieluxnu6254/how-to-get-started-with-arbitrage-bot-deployment-steps",
+    "status": "sent"
+  },
+  "farispitbrakes@gmail.com": {
+    "contacted_at": 1793833145,
+    "keyword": "pump fun bot",
+    "name": "Mohd Faris",
+    "repo": "fariz4446/Pump.fun-Momentum-Bot-V2",
     "status": "sent"
   },
   "floortomproductions@gmail.com": {
@@ -417,6 +445,13 @@
     "keyword": "base arbitrage",
     "name": "otter-leap833791",
     "repo": "otter-leap833791/how-to-create-arbitrage-bot-execution-parameters",
+    "status": "sent"
+  },
+  "stoyanovgoran@gmail.com": {
+    "contacted_at": 1793833142,
+    "keyword": "uniswap v3 base",
+    "name": "Goran Stoyanov",
+    "repo": "GoranStoyanov/Poolser",
     "status": "sent"
   },
   "sun-adage-5h@icloud.com": {
