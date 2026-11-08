@@ -76,6 +76,13 @@
     "repo": "Silver-tiger587185/how-to-build-arbitrage-bot-execution-parameters",
     "status": "sent"
   },
+  "ak@example.com": {
+    "contacted_at": 1794107315,
+    "keyword": "aerodrome bot",
+    "name": "AK",
+    "repo": "ak10082247-max/base-trading-bot-starter",
+    "status": "sent"
+  },
   "akitav2@proton.me": {
     "contacted_at": 1793711555,
     "keyword": "uniswap v3 base",
@@ -207,6 +214,13 @@
     "keyword": "polymarket bot",
     "name": "Damir",
     "repo": "kurecicd/polymarket-bot",
+    "status": "sent"
+  },
+  "darlin@macbook-de-darlin.local": {
+    "contacted_at": 1794107312,
+    "keyword": "polymarket agent",
+    "name": "Darlin Torres",
+    "repo": "Darvder/agente_polygon",
     "status": "sent"
   },
   "denniswells2019@gmail.com": {
@@ -382,6 +396,13 @@
     "keyword": "polymarket bot",
     "name": "Niko Ryba",
     "repo": "NixXxn/AgreeBot",
+    "status": "sent"
+  },
+  "hello@livetennisapi.com": {
+    "contacted_at": 1794107308,
+    "keyword": "polymarket bot",
+    "name": "Live Tennis API",
+    "repo": "livetennisapi/livetennisapi-starter-go",
     "status": "sent"
   },
   "hi@sayo.wtf": {
